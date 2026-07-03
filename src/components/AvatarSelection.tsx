@@ -12,6 +12,7 @@ import buttonClickSound from '../utils/Button Sound.mp3';
 
 interface AvatarSelectionProps {
   onSelect: (name: string, avatarId: string) => void;
+  hope?: number;
 }
 
 const PawPrint = ({ className, size = 20, style }: { className?: string, size?: number, style?: React.CSSProperties }) => (
@@ -74,7 +75,7 @@ const OrnateCornersLarge = () => (
   </>
 );
 
-export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect }) => {
+export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope = 0 }) => {
   const [selectedId, setSelectedId] = useState<string>('calico');
   const [customName, setCustomName] = useState<string>('Luna');
   const [audioPromptShown, setAudioPromptShown] = useState<boolean>(true);
@@ -201,6 +202,11 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect }) =>
           >
             From alley to forever home.
           </motion.p>
+          {hope > 0 && (
+            <p className="text-[10px] md:text-xs font-sans font-black uppercase tracking-wider mt-1 text-[#f4c37c]">
+              Hope Wallet: {hope} - starting warmth improves every 20 Hope
+            </p>
+          )}
         </div>
 
         {/* Campaign Info Badge */}
@@ -313,6 +319,13 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect }) =>
                     <p className="text-xs text-editorial-ink leading-relaxed font-serif italic my-2">
                       "{selectedAvatar.description}"
                     </p>
+                    <div className="mt-3 bg-editorial-bg border border-editorial-ink/20 p-2">
+                      <span className="text-[9px] font-sans uppercase tracking-widest text-editorial-ochre font-bold block">
+                        Archetype
+                      </span>
+                      <p className="text-xs font-sans font-black text-editorial-ink mt-0.5">{selectedAvatar.archetype}</p>
+                      <p className="text-[10px] font-sans text-editorial-ink/75 leading-relaxed mt-1">{selectedAvatar.trait}</p>
+                    </div>
                   </div>
                 </motion.div>
               )}

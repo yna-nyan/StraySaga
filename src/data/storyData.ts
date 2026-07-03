@@ -5,28 +5,37 @@ export const AVATARS: Avatar[] = [
     id: 'calico',
     name: 'Luna',
     breed: 'Calico',
+    archetype: 'The Adaptable Forager',
+    archetypeId: 'forager',
+    trait: 'Foraging rewards grant an extra survival item when food is found.',
     description: 'Curious and gentle, with beautiful patches of orange, black, and white. She is highly alert and moves with careful precision.',
     color: 'bg-amber-100 border-amber-300',
     textColor: 'text-amber-800',
     accentColor: '#d97706',
     portraitSvg: 'calico',
-    startingStats: { energy: 75, warmth: 55, trust: 25 }
+    startingStats: { energy: 95, warmth: 55, trust: 25 }
   },
   {
     id: 'tabby',
     name: 'Buster',
     breed: 'Grey',
+    archetype: 'The Stealth Cautious',
+    archetypeId: 'cautious',
+    trait: 'Aggressive encounters cost less warmth because he keeps to safer shadows.',
     description: 'Brave and energetic, with a sleek, beautiful grey coat. He is quick on his feet and loves exploring narrow spaces.',
     color: 'bg-slate-200 border-slate-300',
     textColor: 'text-slate-800',
     accentColor: '#475569',
     portraitSvg: 'tabby',
-    startingStats: { energy: 90, warmth: 40, trust: 15 }
+    startingStats: { energy: 90, warmth: 55, trust: 15 }
   },
   {
     id: 'black',
     name: 'Shadow',
     breed: 'Bombay Black',
+    archetype: 'The Street-Smart Rogue',
+    archetypeId: 'rogue',
+    trait: 'Sneak checks against blocked or dangerous paths automatically succeed.',
     description: 'Shy, quiet, and extremely stealthy with a sleek pitch-black coat and gold eyes. He blends into shadows to find safety.',
     color: 'bg-zinc-800 border-zinc-700',
     textColor: 'text-zinc-200',
@@ -38,12 +47,15 @@ export const AVATARS: Avatar[] = [
     id: 'tuxedo',
     name: 'Cookie',
     breed: 'White Cat',
+    archetype: 'The Charming Innocent',
+    archetypeId: 'innocent',
+    trait: 'Successful human kindness events grant double trust gains.',
     description: 'Elegant and soft, sporting a beautiful pure white coat. Always optimistic and loves warm spots.',
     color: 'bg-stone-100 border-stone-300',
     textColor: 'text-stone-800',
     accentColor: '#ffffff',
     portraitSvg: 'tuxedo',
-    startingStats: { energy: 65, warmth: 50, trust: 40 }
+    startingStats: { energy: 65, warmth: 50, trust: 60 }
   }
 ];
 
@@ -168,6 +180,29 @@ export const SCENARIOS: Record<string, Scenario> = {
         speaker: '{{name}}',
         text: 'That was too close... my ears are burning. The streets are so unfriendly when you don\'t belong anywhere.',
         type: 'thought'
+      }
+    ],
+    choices: [
+      {
+        id: 'fight',
+        label: 'FIGHT',
+        requirement: 'Requires Energy over 60%',
+        successText: '{{name}} plants her paws, hisses back, and buys just enough space to slip through the fence.',
+        failureText: '{{name}} tries to stand her ground, but the rival is too strong. She escapes cold, shaken, and scraped.'
+      },
+      {
+        id: 'sneak',
+        label: 'SNEAK',
+        requirement: 'Shadow succeeds automatically; others test Energy over 45%',
+        successText: '{{name}} melts behind the bins and threads through a hidden gap without drawing another swipe.',
+        failureText: 'A loose bottle rolls underpaw. The rival snaps toward the sound, forcing a panicked sprint.'
+      },
+      {
+        id: 'beg',
+        label: 'BEG',
+        requirement: 'Requires Trust over 40%',
+        successText: '{{name}} cries out. A porch light clicks on, and the rival retreats as a human voice calls from nearby.',
+        failureText: '{{name}} cries into the alley, but no one comes. The rival advances, and she has to run.'
       }
     ]
   },

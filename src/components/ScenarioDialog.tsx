@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Scenario, ScenarioLine, Waypoint } from '../types';
+import { CatStatus, Scenario, ScenarioChoice, ScenarioLine } from '../types';
 import { SCENARIOS } from '../data/storyData';
 import { CatIcon } from './CatIcon';
 import { motion, AnimatePresence } from 'motion/react';
 import { audio } from '../utils/audio';
-import { ArrowRight, Sparkles, Volume2, ShieldAlert } from 'lucide-react';
+import { ArrowRight, Sparkles } from 'lucide-react';
 
 interface ScenarioDialogProps {
   scenarioId: string;
   catName: string;
   avatarId: string;
+  status: CatStatus;
   onComplete: (statusChanges: { energy: number; warmth: number; trust: number }) => void;
 }
 
@@ -17,18 +18,49 @@ export const ScenarioDialog: React.FC<ScenarioDialogProps> = ({
   scenarioId,
   catName,
   avatarId,
+  status,
   onComplete
 }) => {
   const [lineIndex, setLineIndex] = useState<number>(0);
+  const [visibleChars, setVisibleChars] = useState<number>(0);
+  const [choiceResult, setChoiceResult] = useState<string | null>(null);
   const scenario: Scenario = SCENARIOS[scenarioId] || SCENARIOS.rival;
 
   const currentLine: ScenarioLine = scenario.lines[lineIndex];
+
+  function formatSpeaker(speaker: string) {
+    return speaker.replace('{{name}}', catName);
+  }
+
+  function formatText(text: string) {
+    return text.replace(/{{name}}/g, catName);
+  }
+
+  const formattedLineText = currentLine ? formatText(currentLine.text) : '';
+  const lineComplete = visibleChars >= formattedLineText.length;
 
   useEffect(() => {
     if (currentLine && currentLine.type === 'audio' && currentLine.action) {
       triggerAudioAction(currentLine.action);
     }
   }, [lineIndex]);
+
+  useEffect(() => {
+    setVisibleChars(0);
+    const timer = window.setInterval(() => {
+      setVisibleChars((prev) => {
+        if (prev >= formattedLineText.length) {
+          window.clearInterval(timer);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 30);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [formattedLineText]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -66,6 +98,15 @@ export const ScenarioDialog: React.FC<ScenarioDialogProps> = ({
   };
 
   const handleNext = () => {
+    if (!lineComplete) {
+      setVisibleChars(formattedLineText.length);
+      return;
+    }
+
+    if (lineIndex === scenario.lines.length - 1 && scenario.choices?.length && !choiceResult) {
+      return;
+    }
+
     if (lineIndex < scenario.lines.length - 1) {
       setLineIndex(prev => prev + 1);
     } else {
@@ -95,12 +136,23 @@ export const ScenarioDialog: React.FC<ScenarioDialogProps> = ({
 
   const statsChanges = getScenarioStatsChanges(scenarioId);
 
-  const formatSpeaker = (speaker: string) => {
-    return speaker.replace('{{name}}', catName);
-  };
+  const resolveChoice = (choice: ScenarioChoice) => {
+    let success = false;
 
-  const formatText = (text: string) => {
-    return text.replace(/{{name}}/g, catName);
+    if (choice.id === 'fight') {
+      success = status.energy > 60;
+    } else if (choice.id === 'sneak') {
+      success = status.archetypeId === 'rogue' || status.energy > 45;
+    } else if (choice.id === 'beg') {
+      success = status.trust > 40;
+    }
+
+    setChoiceResult(formatText(success ? choice.successText : choice.failureText));
+    if (success) {
+      audio.playPurr();
+    } else {
+      audio.playHiss();
+    }
   };
 
   const renderPortrait = (speaker: string) => {
@@ -208,7 +260,13 @@ export const ScenarioDialog: React.FC<ScenarioDialogProps> = ({
   const isNarrative = currentLine.type === 'scene' || currentLine.type === 'audio';
 
   return (
-    <div className="fixed inset-0 bg-[#130b08]/75 backdrop-blur-xs z-50 flex items-center justify-center p-4 md:p-8 select-none" id="scenario-overlay">
+    <div
+      className="fixed inset-0 bg-[#130b08]/75 backdrop-blur-xs z-50 flex items-center justify-center p-4 md:p-8 select-none"
+      id="scenario-overlay"
+      onClick={() => {
+        if (!lineComplete) setVisibleChars(formattedLineText.length);
+      }}
+    >
       <div className="wood-frame p-3 max-w-2xl w-full flex flex-col relative overflow-hidden animate-fade-in" id="scenario-card">
         <div className="parchment-panel p-5 md:p-7 flex flex-col relative overflow-hidden">
         {/* Top Accent Strip */}
@@ -246,19 +304,45 @@ export const ScenarioDialog: React.FC<ScenarioDialogProps> = ({
             
             {isNarrative ? (
               <p className="text-editorial-ink text-sm md:text-base leading-relaxed italic font-serif" id="scenario-narrator-line">
-                {formatText(currentLine.text)}
+                {formattedLineText.slice(0, visibleChars)}
               </p>
             ) : currentLine.type === 'thought' ? (
               <p className="text-editorial-ink/90 text-sm md:text-base font-serif italic leading-relaxed pl-3 border-l-2 border-editorial-ochre" id="scenario-thought-line">
-                "{formatText(currentLine.text)}"
+                "{formattedLineText.slice(0, visibleChars)}"
               </p>
             ) : (
               <p className="text-editorial-ink text-sm md:text-base font-sans font-medium leading-relaxed" id="scenario-dialogue-line">
-                "{formatText(currentLine.text)}"
+                "{formattedLineText.slice(0, visibleChars)}"
               </p>
             )}
           </div>
         </div>
+
+        {lineIndex === scenario.lines.length - 1 && scenario.choices?.length && (
+          <div className="border-t border-editorial-ink/15 pt-4">
+            {choiceResult ? (
+              <div className="bg-editorial-bg border border-editorial-ink/30 p-3 text-xs md:text-sm font-serif italic text-editorial-ink">
+                {choiceResult}
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-3 gap-2">
+                {scenario.choices.map((choice) => (
+                  <button
+                    key={choice.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      resolveChoice(choice);
+                    }}
+                    className="saga-button p-3 text-left"
+                  >
+                    <span className="block text-[10px] font-sans font-black uppercase tracking-widest">{choice.label}</span>
+                    <span className="block text-[9px] font-sans text-[#ffe8bd]/80 mt-1 leading-tight">{choice.requirement}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer actions & consequences */}
         <div className="border-t border-editorial-ink/20 pt-4 mt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -296,7 +380,7 @@ export const ScenarioDialog: React.FC<ScenarioDialogProps> = ({
             id="scenario-next-btn"
             className="saga-button w-full sm:w-auto font-sans font-black text-[10px] uppercase tracking-wider py-2.5 px-6 transition-all cursor-pointer flex items-center justify-center gap-2"
           >
-            <span>{lineIndex === scenario.lines.length - 1 ? 'Resume Journey' : 'Next'}</span>
+            <span>{!lineComplete ? 'Reveal Text' : lineIndex === scenario.lines.length - 1 ? 'Resume Journey' : 'Next'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

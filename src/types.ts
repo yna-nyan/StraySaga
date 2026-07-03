@@ -4,10 +4,15 @@ export interface AvatarStartingStats {
   trust: number;
 }
 
+export type AvatarArchetype = 'forager' | 'cautious' | 'rogue' | 'innocent';
+
 export interface Avatar {
   id: string;
   name: string;
   breed: string;
+  archetype: string;
+  archetypeId: AvatarArchetype;
+  trait: string;
   description: string;
   color: string; // Tailind bg class
   textColor: string;
@@ -21,10 +26,28 @@ export type GameState = 'INTRO' | 'SELECTION' | 'PROLOGUE' | 'EXPLORATION' | 'SC
 export interface CatStatus {
   name: string;
   avatarId: string;
+  archetypeId: AvatarArchetype;
+  archetype: string;
   energy: number; // 0 - 100
+  maxEnergy: number;
   warmth: number; // 0 - 100
   trust: number;  // 0 - 100
+  ap: number;
+  turn: number;
+  hope: number;
+  inventory: InventoryItem[];
+  hypothermia: boolean;
   visitedPoints: string[]; // list of visited point IDs
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  kind: 'consumable' | 'accessory';
+  effectLabel: string;
+  energy?: number;
+  warmth?: number;
+  trustMultiplier?: number;
 }
 
 export interface ScenarioLine {
@@ -40,6 +63,15 @@ export interface Scenario {
   subtitle: string;
   pawColor: 'blue' | 'orange' | 'green' | 'purple' | 'yellow' | 'red';
   lines: ScenarioLine[];
+  choices?: ScenarioChoice[];
+}
+
+export interface ScenarioChoice {
+  id: string;
+  label: string;
+  requirement: string;
+  successText: string;
+  failureText: string;
 }
 
 export interface Waypoint {

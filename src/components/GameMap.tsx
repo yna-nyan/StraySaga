@@ -34,13 +34,17 @@ interface GameMapProps {
   initialCoords?: { x: number; z: number };
   onVisitWaypoint: (waypoint: Waypoint) => void;
   onUnlockEnding: () => void;
+  onTravelCost: (distance: number, terrain?: 'clear' | 'complex') => void;
+  onUseItem: (itemId: string) => void;
 }
 
 export const GameMap: React.FC<GameMapProps> = ({
   status,
   initialCoords,
   onVisitWaypoint,
-  onUnlockEnding
+  onUnlockEnding,
+  onTravelCost,
+  onUseItem
 }) => {
   // Sync state coordinates for HUD display
   const [currentX, setCurrentX] = useState<number>(initialCoords?.x ?? 13.5);
@@ -55,6 +59,8 @@ export const GameMap: React.FC<GameMapProps> = ({
   const [isMoving, setIsMoving] = useState<boolean>(false);
   const [facingLeft, setFacingLeft] = useState<boolean>(false);
   const [facingBack, setFacingBack] = useState<boolean>(false);
+  const thermalDistress = status.warmth < 20;
+  const exhausted = status.energy < 30;
 
   // Quests overlay & button state
   const [questsOpen, setQuestsOpen] = useState<boolean>(false);
@@ -132,6 +138,13 @@ export const GameMap: React.FC<GameMapProps> = ({
   const travelTargetRef = useRef<Waypoint | null>(null);
   const nearWaypointRef = useRef<Waypoint | null>(null);
   const keysRef = useRef<Record<string, boolean>>({});
+  const statusRef = useRef(status);
+  const travelStartRef = useRef<{ x: number; z: number } | null>(null);
+  const manualTravelDebtRef = useRef(0);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   // Three.js instances
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -208,6 +221,7 @@ export const GameMap: React.FC<GameMapProps> = ({
 
     // Start auto-walking toward the waypoint
     audio.playPurr();
+    travelStartRef.current = { x: catPosRef.current.x, z: catPosRef.current.z };
     travelTargetRef.current = waypoint;
     setTravelTarget(waypoint);
     isTravelingRef.current = true;
@@ -771,7 +785,7 @@ export const GameMap: React.FC<GameMapProps> = ({
     let animationFrameId: number;
     let bobTime = 0;
     let footstepDist = 0;
-    const speed = 0.45; // Units per frame
+    const baseSpeed = 0.45; // Units per frame
 
     let lastIsMoving = false;
     let lastFacingLeft = false;
@@ -780,6 +794,7 @@ export const GameMap: React.FC<GameMapProps> = ({
     const tick = () => {
       let isMovingNow = false;
       let moveDir = 0; // 0 for unchanged, -1 left, 1 right
+      const activeSpeed = statusRef.current.energy < 30 ? baseSpeed * 0.5 : baseSpeed;
 
       // A. Movement Logic
       if (isTravelingRef.current && travelTargetRef.current) {
@@ -790,8 +805,8 @@ export const GameMap: React.FC<GameMapProps> = ({
 
         if (dist > 0.6) {
           isMovingNow = true;
-          const stepX = (dx / dist) * speed;
-          const stepZ = (dz / dist) * speed;
+          const stepX = (dx / dist) * activeSpeed;
+          const stepZ = (dz / dist) * activeSpeed;
           catPosRef.current.x += stepX;
           catPosRef.current.z += stepZ;
           moveDir = stepX < 0 ? -1 : 1;
@@ -800,6 +815,13 @@ export const GameMap: React.FC<GameMapProps> = ({
           catPosRef.current.z = target.y;
           isTravelingRef.current = false;
           setIsTraveling(false);
+          if (travelStartRef.current) {
+            const tripX = target.x - travelStartRef.current.x;
+            const tripZ = target.y - travelStartRef.current.z;
+            const terrain = target.type === 'rival' || target.type === 'pond' ? 'complex' : 'clear';
+            onTravelCost(Math.sqrt(tripX * tripX + tripZ * tripZ), terrain);
+            travelStartRef.current = null;
+          }
           onVisitWaypoint(target);
         }
       } else {
@@ -819,14 +841,19 @@ export const GameMap: React.FC<GameMapProps> = ({
 
         if (moveX !== 0 || moveZ !== 0) {
           isMovingNow = true;
-          const stepX = moveX * speed;
-          const stepZ = moveZ * speed;
+          const stepX = moveX * activeSpeed;
+          const stepZ = moveZ * activeSpeed;
           catPosRef.current.x += stepX;
           catPosRef.current.z += stepZ;
           moveDir = stepX < 0 ? -1 : 1;
 
           catPosRef.current.x = Math.max(4, Math.min(96, catPosRef.current.x));
           catPosRef.current.z = Math.max(4, Math.min(96, catPosRef.current.z));
+          manualTravelDebtRef.current += Math.sqrt(stepX * stepX + stepZ * stepZ);
+          if (manualTravelDebtRef.current >= 18) {
+            onTravelCost(manualTravelDebtRef.current, 'clear');
+            manualTravelDebtRef.current = 0;
+          }
         }
       }
 
@@ -836,7 +863,7 @@ export const GameMap: React.FC<GameMapProps> = ({
       // B. Walk Sound Effects & Footprint trail generator
       if (isMovingNow) {
         bobTime += 0.25;
-        footstepDist += speed;
+        footstepDist += activeSpeed;
         if (footstepDist >= 6) {
           footstepDist = 0;
           audio.playWaterLap();
@@ -946,8 +973,8 @@ export const GameMap: React.FC<GameMapProps> = ({
         if (ring) ring.rotation.z = time * 0.5; // Rotate flat on ground
         if (card) {
           card.position.y = 3.3 + Math.sin(time * 2.5 + mesh.position.x) * 0.4;
-          card.rotation.y = time * 0.8; // Spin card token
-        }
+        card.rotation.y = time * 0.8; // Spin card token
+      }
       });
 
       // Update coordinate displays (throttled to save CPU)
@@ -1076,11 +1103,14 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       });
     };
-  }, [status.avatarId, status.name]);
+  }, [status.avatarId, status.name, onTravelCost, onVisitWaypoint]);
 
   const allWaypointsVisited = ['rival', 'comrades', 'food', 'pet'].every((id) =>
     status.visitedPoints.includes(id)
   );
+  const hudEnergySegments = Math.max(0, Math.ceil((status.energy / status.maxEnergy) * 5));
+  const hudWarmthSegments = Math.max(0, Math.ceil(status.warmth / 20));
+  const hudTrustSegments = Math.max(0, Math.ceil(status.trust / 20));
 
   return (
     <div className="saga-screen min-h-screen w-full p-4 md:p-8 flex flex-col gap-6 relative overflow-hidden" id="gamemap-screen">
@@ -1121,6 +1151,9 @@ export const GameMap: React.FC<GameMapProps> = ({
               <Navigation className="w-3 h-3" />
               <span>COORDS: X:{currentX} Z:{currentY}</span>
             </div>
+            <div className="text-[9px] font-sans font-black text-[#ffe0ad]/80 uppercase tracking-wider mt-0.5">
+              Turn {status.turn} | AP {Math.round(status.ap)}/{status.maxEnergy} | {status.archetype}
+            </div>
           </div>
         </div>
 
@@ -1140,11 +1173,10 @@ export const GameMap: React.FC<GameMapProps> = ({
               <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500" /> ENERGY</span>
               <span>{status.energy}%</span>
             </div>
-            <div className="h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
-              <div
-                className="h-full bg-amber-500 transition-all duration-500"
-                style={{ width: `${status.energy}%` }}
-              ></div>
+            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div key={index} className={index < hudEnergySegments ? 'bg-amber-500' : 'bg-[#3b2114]'}></div>
+              ))}
             </div>
           </div>
 
@@ -1154,11 +1186,10 @@ export const GameMap: React.FC<GameMapProps> = ({
               <span className="flex items-center gap-1"><Flame className="w-3 h-3 text-red-500" /> WARMTH</span>
               <span>{status.warmth}%</span>
             </div>
-            <div className="h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
-              <div
-                className="h-full bg-red-600 transition-all duration-500"
-                style={{ width: `${status.warmth}%` }}
-              ></div>
+            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div key={index} className={index < hudWarmthSegments ? 'bg-gradient-to-r from-red-700 to-orange-400' : 'bg-[#3b2114]'}></div>
+              ))}
             </div>
           </div>
 
@@ -1168,11 +1199,10 @@ export const GameMap: React.FC<GameMapProps> = ({
               <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-purple-600" /> TRUST</span>
               <span>{status.trust}%</span>
             </div>
-            <div className="h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
-              <div
-                className="h-full bg-purple-700 transition-all duration-500"
-                style={{ width: `${status.trust}%` }}
-              ></div>
+            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div key={index} className={index < hudTrustSegments ? 'bg-rose-600' : 'bg-[#3b2114]'}></div>
+              ))}
             </div>
           </div>
         </div>
@@ -1202,15 +1232,20 @@ export const GameMap: React.FC<GameMapProps> = ({
                 {/* Floating Cat Icon */}
                 <div
                   className={`drop-shadow-[0_8px_6px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
-                    isMoving ? 'animate-bounce' : ''
-                  } ${facingLeft ? 'scale-x-[-1]' : 'scale-x-[1]'}`}
+                    isMoving ? (exhausted ? 'animate-[bounce_1.6s_infinite]' : 'animate-bounce') : ''
+                  } ${thermalDistress ? 'animate-shake' : ''} ${
+                    facingLeft ? 'scale-x-[-1]' : 'scale-x-[1]'
+                  }`}
                   style={{ transformOrigin: 'bottom center' }}
                 >
+                  {thermalDistress && (
+                    <div className="absolute inset-0 -z-10 rounded-full border border-cyan-200/80 shadow-[0_0_18px_rgba(125,211,252,0.85)] animate-ping"></div>
+                  )}
                   <CatIcon
                     avatarId={status.avatarId}
-                    type={status.warmth < 30 ? 'shivering' : 'avatar'}
+                    type={thermalDistress ? 'shivering' : 'avatar'}
                     size={144}
-                    facingBack={true}
+                    facingBack={facingBack}
                   />
                 </div>
                 
@@ -1321,7 +1356,29 @@ export const GameMap: React.FC<GameMapProps> = ({
           {isTraveling && travelTarget && (
             <div className="absolute top-4 right-[175px] bg-editorial-bg border border-editorial-ink px-3 py-1.5 z-20 shadow-xs flex items-center gap-2 text-[10px] font-sans font-black text-editorial-ochre uppercase tracking-wider animate-pulse">
               <Navigation className="w-3.5 h-3.5 animate-spin text-editorial-ink" />
-              <span>GUIDING TO: {travelTarget.name}</span>
+              <span>{exhausted ? 'CRAWLING TO' : 'GUIDING TO'}: {travelTarget.name}</span>
+            </div>
+          )}
+
+          {(status.inventory.length > 0 || status.hypothermia) && (
+            <div className="absolute bottom-4 right-4 z-30 flex flex-col gap-2 items-end">
+              {status.hypothermia && (
+                <div className="bg-cyan-950/90 border border-cyan-300 text-cyan-100 px-3 py-1.5 text-[9px] font-sans font-black uppercase tracking-wider">
+                  Hypothermia: AP recovery halved
+                </div>
+              )}
+              <div className="parchment-panel p-2 flex gap-2 max-w-md">
+                {status.inventory.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => onUseItem(item.id)}
+                    className="saga-button px-2 py-1 text-[8px] font-sans font-black uppercase tracking-wider"
+                    title={`Use ${item.name}`}
+                  >
+                    {item.name} ({item.effectLabel})
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
