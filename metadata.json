@@ -1,0 +1,6 @@
+{
+  "name": "Stray Saga",
+  "description": "An interactive 2D journey simulating a stray kitten's struggle to find a forever home. A touching campaign to stop buying and start adopting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
