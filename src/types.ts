@@ -36,6 +36,7 @@ export interface CatStatus {
   turn: number;
   hope: number;
   inventory: InventoryItem[];
+  equippedAccessoryId?: string;
   hypothermia: boolean;
   visitedPoints: string[]; // list of visited point IDs
 }
@@ -48,6 +49,20 @@ export interface InventoryItem {
   energy?: number;
   warmth?: number;
   trustMultiplier?: number;
+}
+
+export interface Hazard {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  route: string[];
+  routeIndex: number;
+  color: string;
+  penalty: {
+    energy: number;
+    warmth: number;
+  };
 }
 
 export interface ScenarioLine {

@@ -141,7 +141,7 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope
           <div className="absolute top-2.5 right-[-6px] h-6 flex items-center z-30">
             <div className="relative bg-gradient-to-r from-[#5a8f1c] to-[#3f6212] text-white text-[9px] font-sans font-bold px-3 py-1 border-y border-r border-[#ffd875] shadow-md flex items-center gap-1 pl-4"
                  style={{ clipPath: 'polygon(8px 0%, 100% 0%, 100% 100%, 8px 100%, 0% 50%)' }}>
-              <span className="text-[9px]">✓</span>
+              <span className="text-[9px]">OK</span>
               <span>Selected</span>
             </div>
             <div className="absolute right-0 bottom-[-4px] w-[6px] h-[4px] bg-[#22400f]" 
@@ -230,7 +230,7 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope
           <div className="choose-stray-container flex flex-col h-full bg-[#2c1a11]/90 border-2 border-[#5d3d28] rounded-xl overflow-hidden relative shadow-2xl">
             <OrnateCornersLarge />
             <div className="panel-header shrink-0 bg-[#21130b] border-b border-[#5d3d28] px-4 py-2.5 flex items-center gap-2">
-              <span className="header-icon text-[#d4af37] text-xs">■</span>
+              <span className="header-icon text-[#d4af37] text-xs">#</span>
               <span className="header-title font-sans font-black text-xs text-[#ebd5b3] tracking-wider">1. CHOOSE YOUR STRAY COMPANION</span>
             </div>
 

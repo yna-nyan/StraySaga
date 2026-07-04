@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { CatStatus, Waypoint } from '../types';
+import { CatStatus, Hazard, Waypoint } from '../types';
 import { WAYPOINTS } from '../data/storyData';
 import { CatIcon } from './CatIcon';
 import { motion, AnimatePresence } from 'motion/react';
@@ -36,7 +36,17 @@ interface GameMapProps {
   onUnlockEnding: () => void;
   onTravelCost: (distance: number, terrain?: 'clear' | 'complex') => void;
   onUseItem: (itemId: string) => void;
+  hazards?: Hazard[];
+  onHazardCollision?: (hazard: Hazard) => void;
 }
+
+type AmbientZone = 'alley' | 'sanctuary' | 'cottage';
+
+const getAmbientZone = (x: number, y: number): AmbientZone => {
+  if (x > 68 && y < 48) return 'cottage';
+  if ((x > 50 && x < 64 && y > 34 && y < 48) || (x > 36 && x < 64 && y > 60)) return 'sanctuary';
+  return 'alley';
+};
 
 export const GameMap: React.FC<GameMapProps> = ({
   status,
@@ -44,7 +54,9 @@ export const GameMap: React.FC<GameMapProps> = ({
   onVisitWaypoint,
   onUnlockEnding,
   onTravelCost,
-  onUseItem
+  onUseItem,
+  hazards = [],
+  onHazardCollision = (_hazard: Hazard) => {}
 }) => {
   // Sync state coordinates for HUD display
   const [currentX, setCurrentX] = useState<number>(initialCoords?.x ?? 13.5);
@@ -64,6 +76,7 @@ export const GameMap: React.FC<GameMapProps> = ({
 
   // Quests overlay & button state
   const [questsOpen, setQuestsOpen] = useState<boolean>(false);
+  const [instructionsExpanded, setInstructionsExpanded] = useState<boolean>(true);
   const [questImgSrc, setQuestImgSrc] = useState<string>('/quest.png');
   const [questImgFailed, setQuestImgFailed] = useState<boolean>(false);
   const questDropdownRef = useRef<HTMLDivElement>(null);
@@ -139,12 +152,26 @@ export const GameMap: React.FC<GameMapProps> = ({
   const nearWaypointRef = useRef<Waypoint | null>(null);
   const keysRef = useRef<Record<string, boolean>>({});
   const statusRef = useRef(status);
+  const hazardsRef = useRef(hazards);
+  const hazardCollisionRef = useRef<Set<string>>(new Set());
   const travelStartRef = useRef<{ x: number; z: number } | null>(null);
   const manualTravelDebtRef = useRef(0);
 
+  // Store callback props in refs so the heavy Three.js useEffect doesn't re-run
+  const onTravelCostRef = useRef(onTravelCost);
+  const onVisitWaypointRef = useRef(onVisitWaypoint);
+  const onHazardCollisionRef = useRef(onHazardCollision);
+
   useEffect(() => {
     statusRef.current = status;
-  }, [status]);
+    onTravelCostRef.current = onTravelCost;
+    onVisitWaypointRef.current = onVisitWaypoint;
+    onHazardCollisionRef.current = onHazardCollision;
+  });
+
+  useEffect(() => {
+    hazardsRef.current = hazards;
+  }, [hazards]);
 
   // Three.js instances
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -819,10 +846,10 @@ export const GameMap: React.FC<GameMapProps> = ({
             const tripX = target.x - travelStartRef.current.x;
             const tripZ = target.y - travelStartRef.current.z;
             const terrain = target.type === 'rival' || target.type === 'pond' ? 'complex' : 'clear';
-            onTravelCost(Math.sqrt(tripX * tripX + tripZ * tripZ), terrain);
+            onTravelCostRef.current(Math.sqrt(tripX * tripX + tripZ * tripZ), terrain);
             travelStartRef.current = null;
           }
-          onVisitWaypoint(target);
+          onVisitWaypointRef.current(target);
         }
       } else {
         let moveX = 0;
@@ -851,7 +878,7 @@ export const GameMap: React.FC<GameMapProps> = ({
           catPosRef.current.z = Math.max(4, Math.min(96, catPosRef.current.z));
           manualTravelDebtRef.current += Math.sqrt(stepX * stepX + stepZ * stepZ);
           if (manualTravelDebtRef.current >= 18) {
-            onTravelCost(manualTravelDebtRef.current, 'clear');
+            onTravelCostRef.current(manualTravelDebtRef.current, 'clear');
             manualTravelDebtRef.current = 0;
           }
         }
@@ -981,6 +1008,7 @@ export const GameMap: React.FC<GameMapProps> = ({
       if (Math.floor(time * 15) % 3 === 0) {
         setCurrentX(parseFloat(catPosRef.current.x.toFixed(1)));
         setCurrentY(parseFloat(catPosRef.current.z.toFixed(1)));
+        audio.setAmbientZone(getAmbientZone(catPosRef.current.x, catPosRef.current.z));
       }
 
       // Proximity & Nearest Waypoint checking
@@ -1009,6 +1037,20 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       }
 
+      hazardsRef.current.forEach((hazard) => {
+        const dx = catPosRef.current.x - hazard.x;
+        const dz = catPosRef.current.z - hazard.y;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const collisionKey = `${hazard.id}:${hazard.route[hazard.routeIndex] ?? `${hazard.x},${hazard.y}`}`;
+        if (dist < 5.2 && !hazardCollisionRef.current.has(collisionKey)) {
+          hazardCollisionRef.current.add(collisionKey);
+          setErrorMessage(`${hazard.name} intercepted ${statusRef.current.name}: Energy ${hazard.penalty.energy}%, Warmth ${hazard.penalty.warmth}%`);
+          setTimeout(() => setErrorMessage(null), 4200);
+          audio.playHiss();
+          onHazardCollisionRef.current(hazard);
+        }
+      });
+
       // Smooth Camera Centered Follow (Clamped lookAt)
       const camTargetX = THREE.MathUtils.clamp(catPosRef.current.x, 30, 70);
       const camTargetZ = THREE.MathUtils.clamp(catPosRef.current.z, 30, 70);
@@ -1033,6 +1075,15 @@ export const GameMap: React.FC<GameMapProps> = ({
         const el = document.getElementById(`waypoint-${wp.id}`);
         if (el) {
           const pos = project3DTo2D(wp.x, wp.y);
+          el.style.left = `${pos.x}%`;
+          el.style.top = `${pos.y}%`;
+        }
+      });
+
+      hazardsRef.current.forEach((hazard) => {
+        const el = document.getElementById(`hazard-${hazard.id}`);
+        if (el) {
+          const pos = project3DTo2D(hazard.x, hazard.y);
           el.style.left = `${pos.x}%`;
           el.style.top = `${pos.y}%`;
         }
@@ -1103,7 +1154,7 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       });
     };
-  }, [status.avatarId, status.name, onTravelCost, onVisitWaypoint]);
+  }, [status.avatarId, status.name]);
 
   const allWaypointsVisited = ['rival', 'comrades', 'food', 'pet'].every((id) =>
     status.visitedPoints.includes(id)
@@ -1113,16 +1164,7 @@ export const GameMap: React.FC<GameMapProps> = ({
   const hudTrustSegments = Math.max(0, Math.ceil(status.trust / 20));
 
   return (
-    <div className="saga-screen min-h-screen w-full p-4 md:p-8 flex flex-col gap-6 relative overflow-hidden" id="gamemap-screen">
-      <header className="max-w-7xl mx-auto w-full z-10 flex flex-col md:flex-row md:items-end md:justify-between gap-2">
-        <div>
-          <span className="text-[10px] font-sans font-black tracking-[0.25em] text-[#f4c37c] uppercase">Stray Saga &bull; City Map</span>
-          <h1 className="brand-title text-4xl md:text-6xl font-black uppercase leading-none">Alley Expedition</h1>
-        </div>
-        <div className="saga-badge px-3 py-1.5 text-[9px] font-sans uppercase tracking-widest font-black self-start md:self-auto">
-          Adopt Don't Shop
-        </div>
-      </header>
+    <div className="saga-screen w-full h-screen flex flex-col relative overflow-hidden" id="gamemap-screen">
       {/* Top Banner Alert (Locked State) */}
       <AnimatePresence>
         {errorMessage && (
@@ -1139,82 +1181,13 @@ export const GameMap: React.FC<GameMapProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Main HUD Bar */}
-      <div className="wood-frame max-w-7xl mx-auto w-full z-10 p-4 md:p-5 flex flex-col md:flex-row justify-between items-center gap-4" id="map-hud-bar">
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="parchment-panel w-14 h-14 p-1 flex items-center justify-center">
-            <CatIcon avatarId={status.avatarId} type="avatar" size={48} />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold font-serif text-[#ffe0ad]">{status.name}</h2>
-            <div className="flex items-center gap-1.5 text-[10px] font-sans font-black text-[#f4c37c] uppercase tracking-wider">
-              <Navigation className="w-3 h-3" />
-              <span>COORDS: X:{currentX} Z:{currentY}</span>
-            </div>
-            <div className="text-[9px] font-sans font-black text-[#ffe0ad]/80 uppercase tracking-wider mt-0.5">
-              Turn {status.turn} | AP {Math.round(status.ap)}/{status.maxEnergy} | {status.archetype}
-            </div>
-          </div>
-        </div>
-
-        {/* Stray Advocacy compact row/insert */}
-        <div className="hidden md:flex flex-col gap-0.5 px-4 border-l border-r border-[#f4c37c]/25 max-w-md text-center" id="campaign-widget">
-          <span className="text-[8px] font-sans font-black text-[#f4c37c] uppercase tracking-[0.2em] block mb-0.5">STRAY ADVOCACY</span>
-          <p className="text-[10px] font-serif leading-normal text-[#ffe0ad]/85 italic">
-            "Every kitten deserves a permanent hand that stays. Support local shelters & TNR community programs to save tiny souls."
-          </p>
-        </div>
-
-        {/* Status bars */}
-        <div className="flex flex-wrap gap-6 md:gap-8 justify-center md:justify-end w-full md:w-auto shrink-0">
-          {/* Energy Bar */}
-          <div className="flex flex-col gap-1 w-28 sm:w-32" id="hud-energy-metric">
-            <div className="flex justify-between items-center text-[10px] font-sans font-black text-[#ffe0ad] uppercase tracking-wide">
-              <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500" /> ENERGY</span>
-              <span>{status.energy}%</span>
-            </div>
-            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className={index < hudEnergySegments ? 'bg-amber-500' : 'bg-[#3b2114]'}></div>
-              ))}
-            </div>
-          </div>
-
-          {/* Warmth Bar */}
-          <div className="flex flex-col gap-1 w-28 sm:w-32" id="hud-warmth-metric">
-            <div className="flex justify-between items-center text-[10px] font-sans font-black text-[#ffe0ad] uppercase tracking-wide">
-              <span className="flex items-center gap-1"><Flame className="w-3 h-3 text-red-500" /> WARMTH</span>
-              <span>{status.warmth}%</span>
-            </div>
-            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className={index < hudWarmthSegments ? 'bg-gradient-to-r from-red-700 to-orange-400' : 'bg-[#3b2114]'}></div>
-              ))}
-            </div>
-          </div>
-
-          {/* Trust Bar */}
-          <div className="flex flex-col gap-1 w-28 sm:w-32" id="hud-trust-metric">
-            <div className="flex justify-between items-center text-[10px] font-sans font-black text-[#ffe0ad] uppercase tracking-wide">
-              <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-purple-600" /> TRUST</span>
-              <span>{status.trust}%</span>
-            </div>
-            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className={index < hudTrustSegments ? 'bg-rose-600' : 'bg-[#3b2114]'}></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content Layout - Full Width Map, No Sidebar */}
-      <div className="max-w-7xl mx-auto z-10 flex flex-col gap-6 w-full min-h-[500px]" id="map-workspace-row">
+      <div className="z-10 flex flex-col w-full h-full" id="map-workspace-row">
         
         {/* Full Width: Game Map Board */}
         <div
           ref={containerRef}
-          className="saga-map-shell w-full flex flex-col justify-between relative overflow-hidden h-[500px] md:h-[620px] select-none"
+          className="saga-map-shell w-full flex flex-col justify-between relative overflow-hidden h-full select-none"
           id="map-canvas-container"
         >
           {/* Three.js canvas backdrop */}
@@ -1232,7 +1205,7 @@ export const GameMap: React.FC<GameMapProps> = ({
                 {/* Floating Cat Icon */}
                 <div
                   className={`drop-shadow-[0_8px_6px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
-                    isMoving ? (exhausted ? 'animate-[bounce_1.6s_infinite]' : 'animate-bounce') : ''
+                    isMoving ? (exhausted ? 'animate-[bounce_0.5s_infinite]' : 'animate-bounce') : ''
                   } ${thermalDistress ? 'animate-shake' : ''} ${
                     facingLeft ? 'scale-x-[-1]' : 'scale-x-[1]'
                   }`}
@@ -1296,6 +1269,25 @@ export const GameMap: React.FC<GameMapProps> = ({
                 </button>
               );
             })}
+
+            {hazards.map((hazard) => (
+              <div
+                key={hazard.id}
+                id={`hazard-${hazard.id}`}
+                className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center"
+              >
+                <div
+                  className="relative w-9 h-9 rounded-full border-2 border-editorial-ink bg-[#180c08] shadow-[0_0_18px_rgba(239,111,56,0.65)] flex items-center justify-center animate-pulse"
+                  style={{ boxShadow: `0 0 18px ${hazard.color}99` }}
+                  title={hazard.name}
+                >
+                  <AlertTriangle className="w-5 h-5" style={{ color: hazard.color }} />
+                </div>
+                <span className="mt-1 bg-editorial-ink text-editorial-bg border border-editorial-bg px-1.5 py-0.5 text-[7px] font-sans font-black uppercase tracking-wider whitespace-nowrap">
+                  {hazard.name}
+                </span>
+              </div>
+            ))}
           </div>
 
           {/* Zoom Adjust Controls at Very Leftmost Top of the Map */}
@@ -1312,7 +1304,7 @@ export const GameMap: React.FC<GameMapProps> = ({
               className="bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink w-5 h-5 flex items-center justify-center font-sans font-black text-xs transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg border-t border-editorial-ink"
               title="Zoom Out (Shrink Map)"
             >
-              −
+              -
             </button>
           </div>
 
@@ -1327,12 +1319,78 @@ export const GameMap: React.FC<GameMapProps> = ({
             </button>
           </div>
 
+          <div className="absolute top-[92px] left-4 z-30 w-[218px] bg-[#160d0a]/92 border border-[#f4c37c]/70 shadow-[3px_3px_0px_rgba(22,13,10,0.75)] px-3 py-2.5 text-[#ffe0ad] backdrop-blur-xs" id="map-compact-hud">
+            <div className="flex items-center justify-between gap-2 border-b border-[#f4c37c]/25 pb-1.5 mb-2">
+              <span className="flex items-center gap-1.5 text-[9px] font-sans font-black uppercase tracking-wider text-[#f4c37c]">
+                <Navigation className="w-3 h-3" />
+                X:{currentX} Z:{currentY}
+              </span>
+              <span className="text-[8px] font-sans font-black uppercase tracking-wider text-[#ffe0ad]/85">
+                Turn {status.turn}
+              </span>
+            </div>
+            <div className="text-[8px] font-sans font-black uppercase tracking-wider text-[#ffe0ad]/80 mb-2 truncate">
+              AP {Math.round(status.ap)}/{status.maxEnergy} | {status.archetype}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1" id="hud-energy-metric">
+                <div className="flex justify-between items-center text-[9px] font-sans font-black uppercase tracking-wide">
+                  <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500" /> ENERGY</span>
+                  <span>{status.energy}%</span>
+                </div>
+                <div className="grid grid-cols-5 gap-0.5 h-2.5 bg-[#090504] border border-[#f4c37c]/45 p-0.5 shadow-inner">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div key={index} className={index < hudEnergySegments ? 'bg-amber-500' : 'bg-[#3b2114]'}></div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1" id="hud-warmth-metric">
+                <div className="flex justify-between items-center text-[9px] font-sans font-black uppercase tracking-wide">
+                  <span className="flex items-center gap-1"><Flame className="w-3 h-3 text-red-500" /> WARMTH</span>
+                  <span>{status.warmth}%</span>
+                </div>
+                <div className="grid grid-cols-5 gap-0.5 h-2.5 bg-[#090504] border border-[#f4c37c]/45 p-0.5 shadow-inner">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div key={index} className={index < hudWarmthSegments ? 'bg-gradient-to-r from-red-700 to-orange-400' : 'bg-[#3b2114]'}></div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1" id="hud-trust-metric">
+                <div className="flex justify-between items-center text-[9px] font-sans font-black uppercase tracking-wide">
+                  <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-purple-500" /> TRUST</span>
+                  <span>{status.trust}%</span>
+                </div>
+                <div className="grid grid-cols-5 gap-0.5 h-2.5 bg-[#090504] border border-[#f4c37c]/45 p-0.5 shadow-inner">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div key={index} className={index < hudTrustSegments ? 'bg-rose-600' : 'bg-[#3b2114]'}></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Floating Instructions & Status Badges */}
-          <div className="absolute top-4 left-[42px] z-20 bg-editorial-bg/90 backdrop-blur-xs border border-editorial-ink/30 px-3 py-1.5 shadow-xs flex items-center gap-2 max-w-[260px] pointer-events-none">
+          <div 
+            onClick={() => setInstructionsExpanded(!instructionsExpanded)}
+            className="absolute top-4 left-[42px] z-20 bg-editorial-bg/90 backdrop-blur-xs border border-editorial-ink/30 px-3 py-1.5 shadow-xs flex items-center gap-2 cursor-pointer transition-all duration-300"
+            title="Toggle Instructions"
+          >
             <Info className="w-3.5 h-3.5 text-editorial-ochre shrink-0" />
-            <p className="text-[9px] leading-tight font-sans text-editorial-ink font-medium">
-              Use <strong>ARROW keys</strong> or <strong>W/A/S/D</strong> to guide {status.name}. Or click nodes to walk automatically.
-            </p>
+            <AnimatePresence>
+              {instructionsExpanded && (
+                <motion.p 
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: "auto", opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  className="text-[9px] leading-tight font-sans text-editorial-ink font-medium whitespace-nowrap overflow-hidden"
+                >
+                  Use <strong>ARROW keys</strong> or <strong>W/A/S/D</strong> to guide {status.name}. Or click nodes to walk automatically.
+                </motion.p>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Near Waypoint Proximity Banner Prompt */}
@@ -1360,35 +1418,25 @@ export const GameMap: React.FC<GameMapProps> = ({
             </div>
           )}
 
-          {(status.inventory.length > 0 || status.hypothermia) && (
+          {status.hypothermia && (
             <div className="absolute bottom-4 right-4 z-30 flex flex-col gap-2 items-end">
-              {status.hypothermia && (
-                <div className="bg-cyan-950/90 border border-cyan-300 text-cyan-100 px-3 py-1.5 text-[9px] font-sans font-black uppercase tracking-wider">
-                  Hypothermia: AP recovery halved
-                </div>
-              )}
-              <div className="parchment-panel p-2 flex gap-2 max-w-md">
-                {status.inventory.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => onUseItem(item.id)}
-                    className="saga-button px-2 py-1 text-[8px] font-sans font-black uppercase tracking-wider"
-                    title={`Use ${item.name}`}
-                  >
-                    {item.name} ({item.effectLabel})
-                  </button>
-                ))}
+              <div className="bg-cyan-950/90 border border-cyan-300 text-cyan-100 px-3 py-1.5 text-[9px] font-sans font-black uppercase tracking-wider">
+                Hypothermia: AP recovery halved
               </div>
             </div>
           )}
 
-          {/* Active Quests Toggle Button (Uses quest.png / quest-1.png) */}
+          {/* Active Quests Toggle Button */}
           <button
             id="quest-button"
             onClick={() => setQuestsOpen(!questsOpen)}
             className="saga-button absolute top-4 right-4 z-30 px-1.5 py-1 transition-all flex items-center justify-between gap-1 cursor-pointer select-none w-[130px] h-10"
             title="View Active Quests"
           >
+            {/* Green loot indicator dot — positioned above the button*/}
+            {status.inventory.length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.8)] z-50 pointer-events-none" />
+            )}
             <div className="w-6 h-6 flex items-center justify-center shrink-0 bg-editorial-beige border border-editorial-ink/10 relative overflow-hidden rounded-xs p-0.5">
               <img
                 src={questImgSrc}
@@ -1485,6 +1533,41 @@ export const GameMap: React.FC<GameMapProps> = ({
                     );
                   })}
                 </ul>
+
+                <div className="border-t border-editorial-ink/20 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[9px] font-sans font-black text-editorial-ochre uppercase tracking-widest">Loot</span>
+                    <span className="text-[8px] font-sans font-black text-editorial-ink/55 uppercase tracking-wider">{status.inventory.length}/3</span>
+                  </div>
+
+                  {status.inventory.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      {status.inventory.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onUseItem(item.id);
+                          }}
+                          className={`saga-button w-full px-2.5 py-2 text-left text-[8px] font-sans font-black uppercase tracking-wider ${
+                            item.kind === 'accessory' && status.equippedAccessoryId === item.id ? 'ring-2 ring-[#ffd875]' : ''
+                          }`}
+                          title={item.kind === 'accessory' ? `Equip ${item.name}` : `Use ${item.name}`}
+                        >
+                          <span className="block text-[#ffe8bd]">
+                            {item.kind === 'accessory' && status.equippedAccessoryId === item.id ? 'Equipped: ' : ''}
+                            {item.name}
+                          </span>
+                          <span className="block text-[8px] text-[#ffe8bd]/75 mt-0.5">{item.effectLabel}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[9px] font-serif italic text-editorial-ink/65 leading-tight">
+                      No loot carried.
+                    </p>
+                  )}
+                </div>
 
                 {/* Ms. Eleanor's cottage steps indicator */}
                 <div className={`p-2.5 border border-dashed flex items-start gap-2.5 mt-0.5 ${

@@ -4,6 +4,8 @@
 class AudioManager {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false;
+  private ambientGains: Partial<Record<'alley' | 'sanctuary' | 'cottage', GainNode>> = {};
+  private currentAmbientZone: 'alley' | 'sanctuary' | 'cottage' | null = null;
 
   private init() {
     if (!this.ctx) {
@@ -16,6 +18,9 @@ class AudioManager {
 
   setMute(muted: boolean) {
     this.isMuted = muted;
+    if (!muted) {
+      this.currentAmbientZone = null;
+    }
     if (muted && this.ctx && this.ctx.state === 'running') {
       this.ctx.suspend();
     } else if (!muted && this.ctx && this.ctx.state === 'suspended') {
@@ -25,6 +30,91 @@ class AudioManager {
 
   getMuted() {
     return this.isMuted;
+  }
+
+  private ensureAmbientLayers() {
+    if (!this.ctx || this.ambientGains.alley) return;
+
+    const createGain = () => {
+      const gain = this.ctx!.createGain();
+      gain.gain.value = 0;
+      gain.connect(this.ctx!.destination);
+      return gain;
+    };
+
+    const alleyGain = createGain();
+    const sanctuaryGain = createGain();
+    const cottageGain = createGain();
+    this.ambientGains = { alley: alleyGain, sanctuary: sanctuaryGain, cottage: cottageGain };
+
+    const noiseBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 2, this.ctx.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < noiseData.length; i++) {
+      noiseData[i] = Math.random() * 2 - 1;
+    }
+
+    const alleyNoise = this.ctx.createBufferSource();
+    alleyNoise.buffer = noiseBuffer;
+    alleyNoise.loop = true;
+    const alleyFilter = this.ctx.createBiquadFilter();
+    alleyFilter.type = 'lowpass';
+    alleyFilter.frequency.value = 210;
+    alleyNoise.connect(alleyFilter);
+    alleyFilter.connect(alleyGain);
+    alleyNoise.start();
+
+    const sanctuaryOsc = this.ctx.createOscillator();
+    const sanctuaryFilter = this.ctx.createBiquadFilter();
+    sanctuaryOsc.type = 'triangle';
+    sanctuaryOsc.frequency.value = 330;
+    sanctuaryFilter.type = 'bandpass';
+    sanctuaryFilter.frequency.value = 880;
+    sanctuaryFilter.Q.value = 0.7;
+    sanctuaryOsc.connect(sanctuaryFilter);
+    sanctuaryFilter.connect(sanctuaryGain);
+    sanctuaryOsc.start();
+
+    const cottageOsc = this.ctx.createOscillator();
+    const cottageWarmth = this.ctx.createOscillator();
+    const cottageFilter = this.ctx.createBiquadFilter();
+    cottageOsc.type = 'sine';
+    cottageOsc.frequency.value = 196;
+    cottageWarmth.type = 'triangle';
+    cottageWarmth.frequency.value = 294;
+    cottageFilter.type = 'lowpass';
+    cottageFilter.frequency.value = 700;
+    cottageOsc.connect(cottageFilter);
+    cottageWarmth.connect(cottageFilter);
+    cottageFilter.connect(cottageGain);
+    cottageOsc.start();
+    cottageWarmth.start();
+  }
+
+  setAmbientZone(zone: 'alley' | 'sanctuary' | 'cottage') {
+    if (this.isMuted) {
+      this.currentAmbientZone = zone;
+      return;
+    }
+    this.init();
+    if (!this.ctx) return;
+    this.ensureAmbientLayers();
+    if (this.currentAmbientZone === zone) return;
+
+    this.currentAmbientZone = zone;
+    const now = this.ctx.currentTime;
+    const targets = {
+      alley: zone === 'alley' ? 0.035 : 0.004,
+      sanctuary: zone === 'sanctuary' ? 0.025 : 0.002,
+      cottage: zone === 'cottage' ? 0.028 : 0.001
+    };
+
+    (Object.keys(targets) as Array<keyof typeof targets>).forEach((key) => {
+      const gain = this.ambientGains[key];
+      if (!gain) return;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(targets[key], now + 1.4);
+    });
   }
 
   playMeow(pitchMultiplier: number = 1.0) {

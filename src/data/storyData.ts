@@ -13,7 +13,7 @@ export const AVATARS: Avatar[] = [
     textColor: 'text-amber-800',
     accentColor: '#d97706',
     portraitSvg: 'calico',
-    startingStats: { energy: 95, warmth: 55, trust: 25 }
+    startingStats: { energy: 100, warmth: 55, trust: 25 }
   },
   {
     id: 'tabby',
@@ -27,7 +27,7 @@ export const AVATARS: Avatar[] = [
     textColor: 'text-slate-800',
     accentColor: '#475569',
     portraitSvg: 'tabby',
-    startingStats: { energy: 90, warmth: 55, trust: 15 }
+    startingStats: { energy: 100, warmth: 55, trust: 15 }
   },
   {
     id: 'black',
@@ -41,7 +41,7 @@ export const AVATARS: Avatar[] = [
     textColor: 'text-zinc-200',
     accentColor: '#18181b',
     portraitSvg: 'black',
-    startingStats: { energy: 70, warmth: 65, trust: 10 }
+    startingStats: { energy: 100, warmth: 65, trust: 10 }
   },
   {
     id: 'tuxedo',
@@ -55,7 +55,7 @@ export const AVATARS: Avatar[] = [
     textColor: 'text-stone-800',
     accentColor: '#ffffff',
     portraitSvg: 'tuxedo',
-    startingStats: { energy: 65, warmth: 50, trust: 60 }
+    startingStats: { energy: 100, warmth: 50, trust: 60 }
   }
 ];
 
@@ -117,10 +117,10 @@ export const WAYPOINTS: Waypoint[] = [
   },
   {
     id: 'house',
-    name: 'Ms. Eleanor’s House',
+    name: "Ms. Eleanor's House",
     description: 'The cozy cottage at the end of the road. Your final goal.',
-    x: 73.6, // Top-right house steps
-    y: 40.6,
+    x: 71, // Top-right house steps
+    y: 37,
     color: 'bg-red-500 border-red-300 text-red-100',
     glowColor: 'rgba(239, 68, 68, 0.65)',
     type: 'house',
@@ -307,7 +307,7 @@ export const SCENARIOS: Record<string, Scenario> = {
       },
       {
         speaker: '{{name}}',
-        text: 'Food! Real food! It’s crunchy and salty and a little bit dirty, but it tastes like heaven. My belly is finally quiet. This is the best part of my whole day. Please, let there be more days like this.',
+        text: "Food! Real food! It's crunchy and salty and a little bit dirty, but it tastes like heaven. My belly is finally quiet. This is the best part of my whole day. Please, let there be more days like this.",
         type: 'thought'
       }
     ]
@@ -362,7 +362,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   },
   house: {
     id: 'house',
-    title: 'The Final Goal: Ms. Eleanor’s House',
+    title: "The Final Goal: Ms. Eleanor's House",
     subtitle: 'A Warm Haven at the End of the Road',
     pawColor: 'red',
     lines: [
@@ -409,7 +409,7 @@ export const SCENARIOS: Record<string, Scenario> = {
       },
       {
         speaker: '{{name}}',
-        text: 'It’s so warm here. No rain can touch me. No big cats can chase me. The scary road is on the other side of the glass. I have a name now. I have a bowl with my name on it. I don\'t have to be a street cat anymore... I am finally safe.',
+        text: "It's so warm here. No rain can touch me. No big cats can chase me. The scary road is on the other side of the glass. I have a name now. I have a bowl with my name on it. I don't have to be a street cat anymore... I am finally safe.",
         type: 'thought'
       }
     ]
