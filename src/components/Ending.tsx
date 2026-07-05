@@ -3,6 +3,7 @@ import { CatIcon } from './CatIcon';
 import { motion } from 'motion/react';
 import { audio } from '../utils/audio';
 import { Heart, RefreshCw, Sparkles, BookOpen, Volume2, VolumeX } from 'lucide-react';
+import { MusicController } from './MusicController';
 
 import adoptBtnBg from '../assets/Adopt_Cat_Button.png'; 
 import tipsBtnBg from '../assets/Adoption_Tips_Button.png'; 
@@ -11,6 +12,13 @@ interface EndingProps {
   catName: string;
   avatarId: string;
   onRestart: () => void;
+  musicPlaying: boolean;
+  setPlaying?: never; // enforce types
+  musicVolume: number;
+  setMusicVolume: (volume: number) => void;
+  musicMuted: boolean;
+  setMusicMuted: (muted: boolean) => void;
+  setMusicPlaying: (playing: boolean) => void;
 }
 
 interface Ember {
@@ -24,7 +32,17 @@ interface Ember {
   color: string;
 }
 
-export const Ending: React.FC<EndingProps> = ({ catName, avatarId, onRestart }) => {
+export const Ending: React.FC<EndingProps> = ({
+  catName,
+  avatarId,
+  onRestart,
+  musicPlaying,
+  setMusicPlaying,
+  musicVolume,
+  setMusicVolume,
+  musicMuted,
+  setMusicMuted
+}) => {
   const [isMuted, setIsMuted] = useState<boolean>(audio.getMuted());
   const [showTips, setShowTips] = useState<boolean>(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -167,17 +185,29 @@ export const Ending: React.FC<EndingProps> = ({ catName, avatarId, onRestart }) 
       />
 
       {/* Header Utilities */}
-      <header className="z-10 max-w-6xl mx-auto w-full flex justify-between items-center border-b border-[#f4c37c]/35 pb-2 md:pb-4 shrink-0">
+      <header className="z-30 max-w-6xl mx-auto w-full flex justify-between items-center border-b border-[#f4c37c]/35 pb-2 md:pb-4 shrink-0">
         <div>
           <span className="text-[10px] md:text-xs font-bold tracking-widest text-[#f4c37c] font-mono">SAGA COMPLETE</span>
           <h1 className="brand-title text-2xl md:text-5xl font-black uppercase mt-0.5">A Safe Haven</h1>
         </div>
-        <button
-          onClick={toggleMute}
-          className="saga-button p-2 cursor-pointer"
-        >
-          {isMuted ? <VolumeX className="w-4 h-4 md:w-4.5 md:h-4.5" /> : <Volume2 className="w-4 h-4 md:w-4.5 md:h-4.5" />}
-        </button>
+        <div className="flex items-center gap-3">
+          <MusicController
+            playing={musicPlaying}
+            setPlaying={setMusicPlaying}
+            volume={musicVolume}
+            setVolume={setMusicVolume}
+            muted={musicMuted}
+            setMuted={setMusicMuted}
+            theme="parchment"
+            align="right"
+          />
+          <button
+            onClick={toggleMute}
+            className="saga-button p-2 cursor-pointer"
+          >
+            {isMuted ? <VolumeX className="w-4 h-4 md:w-4.5 md:h-4.5" /> : <Volume2 className="w-4 h-4 md:w-4.5 md:h-4.5" />}
+          </button>
+        </div>
       </header>
 
       {/* Main Ending Frame */}

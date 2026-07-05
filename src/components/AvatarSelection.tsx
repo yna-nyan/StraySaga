@@ -5,6 +5,7 @@ import { Avatar } from '../types';
 import { motion } from 'motion/react';
 import { ShieldAlert, Heart, Info, Volume2 } from 'lucide-react';
 import { audio } from '../utils/audio';
+import { MusicController } from './MusicController';
 import backgroundImg from '../assets/Background.png';
 import beginJourneyImg from '../assets/Begin_Journey_Button.png';
 import nameFieldImg from '../assets/Name_Text_Field.png';
@@ -13,6 +14,12 @@ import buttonClickSound from '../utils/Button Sound.mp3';
 interface AvatarSelectionProps {
   onSelect: (name: string, avatarId: string) => void;
   hope?: number;
+  musicPlaying: boolean;
+  setMusicPlaying: (playing: boolean) => void;
+  musicVolume: number;
+  setMusicVolume: (volume: number) => void;
+  musicMuted: boolean;
+  setMusicMuted: (muted: boolean) => void;
 }
 
 const PawPrint = ({ className, size = 20, style }: { className?: string, size?: number, style?: React.CSSProperties }) => (
@@ -75,7 +82,16 @@ const OrnateCornersLarge = () => (
   </>
 );
 
-export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope = 0 }) => {
+export const AvatarSelection: React.FC<AvatarSelectionProps> = ({
+  onSelect,
+  hope = 0,
+  musicPlaying,
+  setMusicPlaying,
+  musicVolume,
+  setMusicVolume,
+  musicMuted,
+  setMusicMuted
+}) => {
   const [selectedId, setSelectedId] = useState<string>('calico');
   const [customName, setCustomName] = useState<string>('Luna');
   const [audioPromptShown, setAudioPromptShown] = useState<boolean>(true);
@@ -112,6 +128,7 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope
   const enableAudio = () => {
     audio.setMute(false);
     audio.playMeow(1.1);
+    setMusicPlaying(true);
     setAudioPromptShown(false);
   };
 
@@ -183,6 +200,18 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope
 
   return (
     <div className="saga-screen h-screen max-h-screen text-editorial-ink flex flex-col justify-between p-4 md:p-6 relative overflow-hidden font-serif select-none bg-cover bg-center" style={{ backgroundImage: `url(${backgroundImg})` }} id="avatar-selection-screen">
+      {/* Background Music Controller */}
+      <div className="absolute top-4 left-4 z-30">
+        <MusicController
+          playing={musicPlaying}
+          setPlaying={setMusicPlaying}
+          volume={musicVolume}
+          setVolume={setMusicVolume}
+          muted={musicMuted}
+          setMuted={setMusicMuted}
+          theme="dark"
+        />
+      </div>
       {/* Header */}
       <header className="max-w-6xl mx-auto w-full flex flex-row justify-between items-center z-10 gap-4 pb-3 mb-3 shrink-0" id="game-header">
         <div className="text-left">

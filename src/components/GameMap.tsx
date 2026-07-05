@@ -23,6 +23,7 @@ import {
   createCatTextureCanvas,
   createWaypointTextureCanvas
 } from '../utils/mapHelpers';
+import { MusicController } from './MusicController';
 
 // Interface defining the scattered treat positions and state
 interface TreatEncounter {
@@ -52,6 +53,12 @@ interface GameMapProps {
   onTravelCost: (distance: number, terrain?: 'clear' | 'complex') => void;
   onUseItem: (itemId: string) => void;
   onCollectTreat?: (item: { id: string; name: string; effectLabel: string; energy: number }) => void; 
+  musicPlaying: boolean;
+  setMusicPlaying: (playing: boolean) => void;
+  musicVolume: number;
+  setMusicVolume: (volume: number) => void;
+  musicMuted: boolean;
+  setMusicMuted: (muted: boolean) => void;
 }
 
 export const GameMap: React.FC<GameMapProps> = ({
@@ -61,13 +68,19 @@ export const GameMap: React.FC<GameMapProps> = ({
   onUnlockEnding,
   onTravelCost,
   onUseItem,
-  onCollectTreat
+  onCollectTreat,
+  musicPlaying,
+  setMusicPlaying,
+  musicVolume,
+  setMusicVolume,
+  musicMuted,
+  setMusicMuted
 }) => {
   // Sync state coordinates for HUD display
   const [currentX, setCurrentX] = useState<number>(initialCoords?.x ?? 13.5);
   const [currentY, setCurrentY] = useState<number>(initialCoords?.z ?? 75.7);
   const [isTraveling, setIsTraveling] = useState<boolean>(false);
-  const [travelTarget, setTravelTarget] = useState<Waypoint | null>(null);
+  const [travelTarget, setTravelTarget] = useState<Waypoint | TreatEncounter | null>(null);
   const [nearWaypoint, setNearWaypoint] = useState<Waypoint | null>(null);
   
   // Track collected treats to avoid rendering or interacting with them twice
@@ -90,6 +103,7 @@ export const GameMap: React.FC<GameMapProps> = ({
   const [questImgSrc, setQuestImgSrc] = useState<string>('/quest.png');
   const [questImgFailed, setQuestImgFailed] = useState<boolean>(false);
   const questDropdownRef = useRef<HTMLDivElement>(null);
+  const [instructionExpanded, setInstructionExpanded] = useState<boolean>(true);
 
   // Close quests panel on clicking outside
   useEffect(() => {
@@ -156,13 +170,13 @@ export const GameMap: React.FC<GameMapProps> = ({
     z: initialCoords?.z ?? 75.7
   });
   const isTravelingRef = useRef(false);
-  const travelTargetRef = useRef<Waypoint | null>(null);
+  const travelTargetRef = useRef<Waypoint | TreatEncounter | null>(null);
   const nearWaypointRef = useRef<Waypoint | null>(null);
   const keysRef = useRef<Record<string, boolean>>({});
   const statusRef = useRef(status);
   const travelStartRef = useRef<{ x: number; z: number } | null>(null);
   const manualTravelDebtRef = useRef(0);
-  const collectedTreatsRef = useRef<string[]>([]);
+  const collectedTreatsRef = useRef<string[]>(status.collectedTreats ?? []);
 
   useEffect(() => {
     statusRef.current = status;
@@ -248,6 +262,18 @@ export const GameMap: React.FC<GameMapProps> = ({
     travelStartRef.current = { x: catPosRef.current.x, z: catPosRef.current.z };
     travelTargetRef.current = waypoint;
     setTravelTarget(waypoint);
+    isTravelingRef.current = true;
+    setIsTraveling(true);
+  };
+
+  // Handle treat navigation
+  const handleTreatClick = (treat: TreatEncounter) => {
+    if (isTravelingRef.current) return;
+
+    audio.playPurr();
+    travelStartRef.current = { x: catPosRef.current.x, z: catPosRef.current.z };
+    travelTargetRef.current = treat;
+    setTravelTarget(treat);
     isTravelingRef.current = true;
     setIsTraveling(true);
   };
@@ -596,8 +622,10 @@ export const GameMap: React.FC<GameMapProps> = ({
 
       if (isTravelingRef.current && travelTargetRef.current) {
         const target = travelTargetRef.current;
-        const dx = target.x - catPosRef.current.x;
-        const dz = target.y - catPosRef.current.z;
+        const targetX = target.x;
+        const targetZ = 'y' in target ? target.y : target.z;
+        const dx = targetX - catPosRef.current.x;
+        const dz = targetZ - catPosRef.current.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
 
         if (dist > 0.6) {
@@ -608,18 +636,21 @@ export const GameMap: React.FC<GameMapProps> = ({
           catPosRef.current.z += stepZ;
           moveDir = stepX < 0 ? -1 : 1;
         } else {
-          catPosRef.current.x = target.x;
-          catPosRef.current.z = target.y;
+          catPosRef.current.x = targetX;
+          catPosRef.current.z = targetZ;
           isTravelingRef.current = false;
           setIsTraveling(false);
           if (travelStartRef.current) {
-            const tripX = target.x - travelStartRef.current.x;
-            const tripZ = target.y - travelStartRef.current.z;
-            const terrain = target.type === 'rival' || target.type === 'pond' ? 'complex' : 'clear';
+            const tripX = targetX - travelStartRef.current.x;
+            const tripZ = targetZ - travelStartRef.current.z;
+            const isWaypoint = 'type' in target;
+            const terrain = isWaypoint && (target.type === 'rival' || target.type === 'pond') ? 'complex' : 'clear';
             onTravelCost(Math.sqrt(tripX * tripX + tripZ * tripZ), terrain);
             travelStartRef.current = null;
           }
-          onVisitWaypoint(target);
+          if ('type' in target) {
+            onVisitWaypoint(target);
+          }
         }
       } else {
         let moveX = 0;
@@ -931,24 +962,14 @@ export const GameMap: React.FC<GameMapProps> = ({
   const hudTrustSegments = Math.max(0, Math.ceil(status.trust / 20));
 
   return (
-    <div className="saga-screen min-h-screen w-full p-4 md:p-8 flex flex-col gap-6 relative overflow-hidden" id="gamemap-screen">
-      <header className="max-w-7xl mx-auto w-full z-10 flex flex-col md:flex-row md:items-end md:justify-between gap-2">
-        <div>
-          <span className="text-[10px] font-sans font-black tracking-[0.25em] text-[#f4c37c] uppercase">Stray Saga &bull; City Map</span>
-          <h1 className="brand-title text-4xl md:text-6xl font-black uppercase leading-none">Alley Expedition</h1>
-        </div>
-        <div className="saga-badge px-3 py-1.5 text-[9px] font-sans uppercase tracking-widest font-black self-start md:self-auto">
-          Adopt Don't Shop
-        </div>
-      </header>
-
+    <div className="saga-screen h-screen w-screen relative overflow-hidden" id="gamemap-screen">
       <AnimatePresence>
         {errorMessage && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="bg-red-950/90 border-2 border-red-800 text-red-200 p-4 shadow-[4px_4px_0px_#991b1b] flex items-center gap-3 z-40 text-xs font-sans font-black uppercase tracking-wider"
+            className="bg-red-950/90 border-2 border-red-800 text-red-200 p-4 shadow-[4px_4px_0px_#991b1b] flex items-center gap-3 z-40 text-xs font-sans font-black uppercase tracking-wider absolute top-4 left-1/2 -translate-x-1/2"
             id="map-error-bar"
           >
             <AlertTriangle className="w-5 h-5 shrink-0 text-red-500 animate-pulse" />
@@ -957,393 +978,445 @@ export const GameMap: React.FC<GameMapProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Main HUD Bar */}
-      <div className="wood-frame max-w-7xl mx-auto w-full z-10 p-4 md:p-5 flex flex-col md:flex-row justify-between items-center gap-4" id="map-hud-bar">
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="parchment-panel w-14 h-14 p-1 flex items-center justify-center">
-            <CatIcon avatarId={status.avatarId} type="avatar" size={48} />
-          </div>
+      {/* Left Side: Floating Stats Panel */}
+      <div className="absolute top-[110px] left-4 w-[260px] z-20 bg-[#160d0a]/95 border border-[#4a2e1b] p-3.5 shadow-2xl text-[#ffe0ad] font-sans rounded-xs" id="hud-stats-panel">
+        {/* Coordinates & Turn */}
+        <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-[#f4c37c] border-b border-[#4a2e1b]/40 pb-1.5 mb-2">
+          <span className="flex items-center gap-1">
+            <Navigation className="w-3 h-3 text-[#f4c37c]" />
+            X:{currentX} Z:{currentY}
+          </span>
+          <span>TURN {status.turn}</span>
+        </div>
+
+        {/* AP Title & Archetype */}
+        <div className="text-[9px] font-black uppercase tracking-wide text-[#ffe0ad]/80 mb-3.5">
+          AP {Math.round(status.ap)}/{status.maxEnergy} | {status.archetype}
+        </div>
+
+        <div className="space-y-3.5">
+          {/* Energy Segment Bar */}
           <div>
-            <h2 className="text-xl font-bold font-serif text-[#ffe0ad]">{status.name}</h2>
-            <div className="flex items-center gap-1.5 text-[10px] font-sans font-black text-[#f4c37c] uppercase tracking-wider">
-              <Navigation className="w-3 h-3" />
-              <span>COORDS: X:{currentX} Z:{currentY}</span>
+            <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider mb-1">
+              <span className="flex items-center gap-1 text-amber-500">
+                <Zap className="w-3 h-3 text-amber-500 fill-amber-500" /> ENERGY
+              </span>
+              <span className="text-[10px] font-black text-amber-500">{status.energy}%</span>
             </div>
-            <div className="text-[9px] font-sans font-black text-[#ffe0ad]/80 uppercase tracking-wider mt-0.5">
-              Turn {status.turn} | AP {Math.round(status.ap)}/{status.maxEnergy} | {status.archetype}
-            </div>
-          </div>
-        </div>
-
-        <div className="hidden md:flex flex-col gap-0.5 px-4 border-l border-r border-[#f4c37c]/25 max-w-md text-center" id="campaign-widget">
-          <span className="text-[8px] font-sans font-black text-[#f4c37c] uppercase tracking-[0.2em] block mb-0.5">STRAY ADVOCACY</span>
-          <p className="text-[10px] font-serif leading-normal text-[#ffe0ad]/85 italic">
-            "Every kitten deserves a permanent hand that stays. Support local shelters & TNR community programs to save tiny souls."
-          </p>
-        </div>
-
-        {/* Status bars */}
-        <div className="flex flex-wrap gap-6 md:gap-8 justify-center md:justify-end w-full md:w-auto shrink-0">
-          {/* Energy Bar */}
-          <div className="flex flex-col gap-1 w-28 sm:w-32" id="hud-energy-metric">
-            <div className="flex justify-between items-center text-[10px] font-sans font-black text-[#ffe0ad] uppercase tracking-wide">
-              <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500" /> ENERGY</span>
-              <span>{status.energy}%</span>
-            </div>
-            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
+            <div className="grid grid-cols-5 gap-0.5 h-2.5 bg-[#0a0503] p-0.5 border border-[#4a2e1b]/60">
               {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className={index < hudEnergySegments ? 'bg-amber-500' : 'bg-[#3b2114]'}></div>
+                <div 
+                  key={index} 
+                  className={`h-full ${index < hudEnergySegments ? 'bg-amber-500' : 'bg-[#22130c]'}`}
+                ></div>
               ))}
             </div>
           </div>
 
-          {/* Warmth Bar */}
-          <div className="flex flex-col gap-1 w-28 sm:w-32" id="hud-warmth-metric">
-            <div className="flex justify-between items-center text-[10px] font-sans font-black text-[#ffe0ad] uppercase tracking-wide">
-              <span className="flex items-center gap-1"><Flame className="w-3 h-3 text-red-500" /> WARMTH</span>
-              <span>{status.warmth}%</span>
+          {/* Warmth Segment Bar */}
+          <div>
+            <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider mb-1">
+              <span className="flex items-center gap-1 text-red-500">
+                <Flame className="w-3 h-3 text-red-500 fill-red-500" /> WARMTH
+              </span>
+              <span className="text-[10px] font-black text-red-500">{status.warmth}%</span>
             </div>
-            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
+            <div className="grid grid-cols-5 gap-0.5 h-2.5 bg-[#0a0503] p-0.5 border border-[#4a2e1b]/60">
               {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className={index < hudWarmthSegments ? 'bg-gradient-to-r from-red-700 to-orange-400' : 'bg-[#3b2114]'}></div>
+                <div 
+                  key={index} 
+                  className={`h-full ${index < hudWarmthSegments ? 'bg-orange-500' : 'bg-[#22130c]'}`}
+                ></div>
               ))}
             </div>
           </div>
 
-          {/* Trust Bar */}
-          <div className="flex flex-col gap-1 w-28 sm:w-32" id="hud-trust-metric">
-            <div className="flex justify-between items-center text-[10px] font-sans font-black text-[#ffe0ad] uppercase tracking-wide">
-              <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-purple-600" /> TRUST</span>
-              <span>{status.trust}%</span>
+          {/* Trust Segment Bar */}
+          <div>
+            <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider mb-1">
+              <span className="flex items-center gap-1 text-purple-400">
+                <Heart className="w-3 h-3 text-purple-500 fill-purple-500" /> TRUST
+              </span>
+              <span className="text-[10px] font-black text-purple-400">{status.trust}%</span>
             </div>
-            <div className="grid grid-cols-5 gap-0.5 h-3 bg-[#160d0a] border border-[#f4c37c]/50 p-0.5 shadow-inner">
+            <div className="grid grid-cols-5 gap-0.5 h-2.5 bg-[#0a0503] p-0.5 border border-[#4a2e1b]/60">
               {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className={index < hudTrustSegments ? 'bg-rose-600' : 'bg-[#3b2114]'}></div>
+                <div 
+                  key={index} 
+                  className={`h-full ${index < hudTrustSegments ? 'bg-rose-600' : 'bg-[#22130c]'}`}
+                ></div>
               ))}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content Layout */}
-      <div className="max-w-7xl mx-auto z-10 flex flex-col gap-6 w-full min-h-[500px]" id="map-workspace-row">
-        <div
-          ref={containerRef}
-          className="saga-map-shell w-full flex flex-col justify-between relative overflow-hidden h-[500px] md:h-[620px] select-none"
-          id="map-canvas-container"
-        >
-          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block z-0" />
+      {/* Full screen Map Canvas Container */}
+      <div
+        ref={containerRef}
+        className="absolute inset-0 w-full h-full z-0 select-none"
+        id="map-canvas-container"
+      >
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block z-0" />
 
-          {/* 3D-to-2D Space Overlay */}
-          <div className="absolute inset-0 pointer-events-none z-10">
-            
-            {/* Active Floating Cat Marker Overlay */}
-            <div
-              id="active-cat-avatar-marker"
-              className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-[85%] flex flex-col items-center select-none z-20"
-            >
-              <div className="relative flex flex-col items-center">
-                <div
-                  className={`drop-shadow-[0_8px_6px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
-                    isMoving ? (exhausted ? 'animate-[bounce_1.6s_infinite]' : 'animate-bounce') : ''
-                  } ${thermalDistress ? 'animate-shake' : ''} ${
-                    facingLeft ? 'scale-x-[-1]' : 'scale-x-[1]'
-                  }`}
-                  style={{ transformOrigin: 'bottom center' }}
-                >
-                  {thermalDistress && (
-                    <div className="absolute inset-0 -z-10 rounded-full border border-cyan-200/80 shadow-[0_0_18px_rgba(125,211,252,0.85)] animate-ping"></div>
-                  )}
-                  <CatIcon
-                    avatarId={status.avatarId}
-                    type={thermalDistress ? 'shivering' : 'avatar'}
-                    size={144}
-                    facingBack={facingBack}
-                  />
-                </div>
-                
-                <div className="bg-editorial-ink text-editorial-bg text-[8px] font-sans font-black tracking-widest uppercase border border-editorial-ink px-1.5 py-0.5 rounded-xs shadow-md whitespace-nowrap mt-1">
-                  {status.name}
-                </div>
-              </div>
-            </div>
-
-            {/* Waypoint Clickable HUD Buttons */}
-            {WAYPOINTS.map((wp) => {
-              const isVisited = status.visitedPoints.includes(wp.id);
-              const isActive = activeWaypointId === wp.id;
-              
-              return (
-                <button
-                  key={wp.id}
-                  id={`waypoint-${wp.id}`}
-                  onClick={() => handleWaypointClick(wp)}
-                  onMouseEnter={() => {
-                    if (!isTraveling) setActiveWaypointId(wp.id);
-                  }}
-                  onMouseLeave={() => setActiveWaypointId(null)}
-                  className="absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 flex flex-col items-center"
-                >
-                  <div className="relative group">
-                    <div className="absolute inset-0 rounded-full bg-editorial-ink/20 scale-125 blur-xs group-hover:scale-150 transition-all"></div>
-                    <div className="w-8 h-8 rounded-full border border-editorial-ink flex items-center justify-center bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink hover:text-editorial-bg font-sans font-black text-xs transition-colors shadow-sm">
-                      {isVisited ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-800" />
-                      ) : wp.id === 'house' ? (
-                        <Home className="w-4 h-4 text-rose-700 animate-pulse" />
-                      ) : (
-                        wp.id.charAt(0).toUpperCase()
-                      )}
-                    </div>
-                  </div>
-
-                  {isActive && (
-                    <div className="absolute top-10 bg-editorial-bg border border-editorial-ink p-2 shadow-md w-32 rounded-xs pointer-events-none text-left z-30">
-                      <h4 className="text-[9px] font-sans font-black text-editorial-ochre uppercase tracking-wider">{wp.name}</h4>
-                      <p className="text-[8px] leading-tight font-serif text-editorial-ink mt-0.5">{wp.description}</p>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-
-            {/* Floating DOM interactions for treat items (Marked visually as standalone pawprint indicators) */}
-            {TREAT_LOCATIONS.map((treat) => {
-              const isCollected = collectedTreatIds.includes(treat.id);
-              if (isCollected) return null;
-              const isHovered = activeTreatId === treat.id;
-
-              return (
-                <div
-                  key={treat.id}
-                  id={`treat-node-${treat.id}`}
-                  onMouseEnter={() => setActiveTreatId(treat.id)}
-                  onMouseLeave={() => setActiveTreatId(null)}
-                  className="absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center text-amber-600 hover:text-amber-500"
-                >
-                  {/* Paw icon explicitly used for treat encounters */}
-                  <div className="relative p-1.5 bg-amber-950/90 border border-amber-500 rounded-full shadow-lg hover:scale-110 transition-transform">
-                    <PawPrint className="w-4 h-4 animate-pulse" />
-                  </div>
-
-                  {isHovered && (
-                    <div className="absolute top-9 bg-amber-950 border-2 border-amber-500 p-2 shadow-md w-28 rounded-sm pointer-events-none text-left z-30">
-                      <h4 className="text-[9px] font-sans font-black text-amber-400 uppercase tracking-wider">{treat.name} Snack</h4>
-                      <p className="text-[8px] leading-tight font-sans text-amber-200 mt-0.5">{treat.effectLabel}</p>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Zoom Adjust Controls */}
-          <div className="absolute top-4 left-4 z-30 flex flex-col shadow-[2px_2px_0px_#2D2A26] border border-editorial-ink" id="map-zoom-controls">
-            <button
-              onClick={handleZoomIn}
-              className="bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink w-5 h-5 flex items-center justify-center font-sans font-black text-xs transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg"
-              title="Zoom In"
-            >
-              +
-            </button>
-            <button
-              onClick={handleZoomOut}
-              className="bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink w-5 h-5 flex items-center justify-center font-sans font-black text-xs transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg border-t border-editorial-ink"
-              title="Zoom Out"
-            >
-              −
-            </button>
-          </div>
-
-          <div className="absolute top-[62px] left-4 z-30 flex flex-col shadow-[2px_2px_0px_#2D2A26] border border-editorial-ink" id="map-sound-controls">
-            <button
-              onClick={handleToggleMute}
-              className="bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink w-5 h-5 flex items-center justify-center transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg"
-              title={isMuted ? 'Unmute game' : 'Mute game'}
-            >
-              {isMuted ? <VolumeX className="w-3 h-3 text-editorial-ink" /> : <Volume2 className="w-3 h-3 text-editorial-ink" />}
-            </button>
-          </div>
-
-          <div className="absolute top-4 left-[42px] z-20 bg-editorial-bg/90 backdrop-blur-xs border border-editorial-ink/30 px-3 py-1.5 shadow-xs flex items-center gap-2 max-w-[260px] pointer-events-none">
-            <CheckCircle2 className="w-3.5 h-3.5 text-editorial-ochre shrink-0" />
-            <p className="text-[9px] leading-tight font-sans text-editorial-ink font-medium">
-              Use <strong>ARROW keys</strong> or step on scattered golden <strong>Pawprint Icons</strong> to secure Tuna or Kibble rewards!
-            </p>
-          </div>
-
-          {/* Near Waypoint Banner Prompt */}
-          <AnimatePresence>
-            {nearWaypoint && !isTraveling && (
-              <motion.div
-                initial={{ opacity: 0, y: 30, x: '-50%' }}
-                animate={{ opacity: 1, y: 0, x: '-50%' }}
-                exit={{ opacity: 0, y: 30, x: '-50%' }}
-              className="absolute bottom-6 left-1/2 transform -translate-x-1/2 parchment-panel px-5 py-3 z-30 flex items-center gap-3"
-              >
-                <div className="w-2.5 h-2.5 bg-editorial-ochre animate-ping rounded-full shrink-0"></div>
-                <span className="text-[10px] font-sans font-black uppercase tracking-wider text-editorial-ink whitespace-nowrap">
-                  Near {nearWaypoint.name}. Press <span className="px-1.5 py-0.5 bg-editorial-ink text-editorial-bg rounded-sm font-mono text-[9px] mx-0.5">SPACE</span> or <span className="px-1.5 py-0.5 bg-editorial-ink text-editorial-bg rounded-sm font-mono text-[9px] mx-0.5">ENTER</span> to explore!
-                </span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Auto-traveling overlay block */}
-          {isTraveling && travelTarget && (
-            <div className="absolute top-4 right-[175px] bg-editorial-bg border border-editorial-ink px-3 py-1.5 z-20 shadow-xs flex items-center gap-2 text-[10px] font-sans font-black text-editorial-ochre uppercase tracking-wider animate-pulse">
-              <Navigation className="w-3.5 h-3.5 animate-spin text-editorial-ink" />
-              <span>{exhausted ? 'CRAWLING TO' : 'GUIDING TO'}: {travelTarget.name}</span>
-            </div>
-          )}
-
-          {/* Inventory consumables execution and tracking panel */}
-          {(status.inventory.length > 0 || status.hypothermia) && (
-            <div className="absolute bottom-4 right-4 z-30 flex flex-col gap-2 items-end">
-              {status.hypothermia && (
-                <div className="bg-cyan-950/90 border border-cyan-300 text-cyan-100 px-3 py-1.5 text-[9px] font-sans font-black uppercase tracking-wider">
-                  Hypothermia: AP recovery halved
-                </div>
-              )}
-              <div className="parchment-panel p-2 flex gap-2 max-w-md flex-wrap justify-end">
-                {status.inventory.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => onUseItem(item.id)}
-                    className="saga-button px-2 py-1 text-[8px] font-sans font-black uppercase tracking-wider bg-amber-900/40 border-amber-700/60"
-                    title={`Eat ${item.name}`}
-                  >
-                    Consume: {item.name} ({item.effectLabel})
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Active Quests Toggle Button */}
-          <button
-            id="quest-button"
-            onClick={() => setQuestsOpen(!questsOpen)}
-            className="saga-button absolute top-4 right-4 z-30 px-1.5 py-1 transition-all flex items-center justify-between gap-1 cursor-pointer select-none w-[130px] h-10"
-            title="View Active Quests"
+        {/* 3D-to-2D Space Overlay */}
+        <div className="absolute inset-0 pointer-events-none z-10">
+          
+          {/* Active Floating Cat Marker Overlay */}
+          <div
+            id="active-cat-avatar-marker"
+            className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-[85%] flex flex-col items-center select-none z-20"
           >
-            <div className="w-6 h-6 flex items-center justify-center shrink-0 bg-editorial-beige border border-editorial-ink/10 relative overflow-hidden rounded-xs p-0.5">
-              <img
-                src={questImgSrc}
-                alt="Quests"
-                className={`w-full h-full object-contain transition-transform duration-200 hover:scale-105 ${questImgFailed ? 'opacity-0 absolute' : 'opacity-100'}`}
-                onError={() => {
-                  if (questImgSrc === '/quest.png') {
-                    setQuestImgSrc('/quest-1.png');
-                  } else {
-                    setQuestImgFailed(true);
-                  }
-                }}
-              />
-              {questImgFailed && (
-                <CheckCircle2 className="w-3.5 h-3.5 text-editorial-ochre animate-pulse" />
-              )}
-            </div>
-            <div className="flex flex-col text-left">
-              <span className="text-[6.5px] font-sans font-black text-editorial-ochre uppercase tracking-wider leading-none mb-0.5">ACTIVE</span>
-              <span className="text-[9px] font-sans font-black text-editorial-ink leading-none tracking-wide">QUESTS</span>
-            </div>
-            <span className="bg-editorial-ink text-editorial-bg text-[8px] font-sans font-black px-1 py-0.5 ml-0.5 rounded-xs shrink-0">
-              {status.visitedPoints.length}/4
-            </span>
-          </button>
-
-          {/* Active Quests Dropdown Modal */}
-          <AnimatePresence>
-            {questsOpen && (
-              <motion.div
-                ref={questDropdownRef}
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                className="parchment-panel absolute top-[68px] right-4 w-72 z-40 p-4 flex flex-col gap-3"
-                id="objectives-widget"
+            <div className="relative flex flex-col items-center">
+              <div
+                className={`drop-shadow-[0_8px_6px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
+                  isMoving ? (exhausted ? 'animate-[bounce_1.6s_infinite]' : 'animate-bounce') : ''
+                } ${thermalDistress ? 'animate-shake' : ''} ${
+                  facingLeft ? 'scale-x-[-1]' : 'scale-x-[1]'
+                }`}
+                style={{ transformOrigin: 'bottom center' }}
               >
-                <div className="border-b-2 border-editorial-ink pb-2 flex justify-between items-center">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 bg-editorial-ochre inline-block"></span>
-                    <h3 className="text-xs font-sans font-black text-editorial-ochre uppercase tracking-widest">ACTIVE QUESTS</h3>
-                  </div>
-                  <button
-                    onClick={() => setQuestsOpen(false)}
-                    className="text-editorial-ink hover:text-editorial-ochre p-1 transition-colors cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
+                {thermalDistress && (
+                  <div className="absolute inset-0 -z-10 rounded-full border border-cyan-200/80 shadow-[0_0_18px_rgba(125,211,252,0.85)] animate-ping"></div>
+                )}
+                <CatIcon
+                  avatarId={status.avatarId}
+                  type={thermalDistress ? 'shivering' : 'avatar'}
+                  size={144}
+                  facingBack={facingBack}
+                />
+              </div>
+              
+              <div className="bg-editorial-ink text-editorial-bg text-[8px] font-sans font-black tracking-widest uppercase border border-editorial-ink px-1.5 py-0.5 rounded-xs shadow-md whitespace-nowrap mt-1">
+                {status.name}
+              </div>
+            </div>
+          </div>
 
-                <p className="text-[11px] font-serif text-editorial-ink/80 italic leading-relaxed">
-                  Ms. Eleanor's cottage steps are locked. You must explore all four outer landmarks before her porch unlocks.
-                </p>
-
-                <ul className="flex flex-col gap-2.5 font-sans text-xs">
-                  {WAYPOINTS.filter(wp => wp.id !== 'house' && wp.id !== 'pond').map((wp) => {
-                    const isFound = status.visitedPoints.includes(wp.id);
-                    return (
-                      <li
-                        key={wp.id}
-                        onClick={() => {
-                          if (!isTraveling) {
-                            handleWaypointClick(wp);
-                            setQuestsOpen(false);
-                          }
-                        }}
-                        className="flex items-center gap-2.5 py-1 px-1.5 border border-transparent hover:border-editorial-ink/15 hover:bg-editorial-beige cursor-pointer transition-all group rounded-sm"
-                      >
-                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-all ${
-                          isFound 
-                            ? 'bg-emerald-100 border-emerald-500 text-emerald-800 shadow-xs' 
-                            : 'bg-editorial-bg border-editorial-ink/40 group-hover:border-editorial-ochre'
-                        }`}>
-                          {isFound ? (
-                            <CheckCircle2 className="w-3 h-3" />
-                          ) : (
-                            <span className="text-[8px] font-black">{wp.id.charAt(0).toUpperCase()}</span>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className={`font-black text-[9px] uppercase tracking-wider block ${
-                            isFound ? 'line-through text-editorial-ink/50' : 'text-editorial-ink'
-                          }`}>
-                            {wp.name}
-                          </span>
-                        </div>
-                        {!isFound && (
-                          <span className="text-[8px] font-sans font-black text-editorial-ochre opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-wider">
-                            Go &rarr;
-                          </span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-
-                <div className={`p-2.5 border border-dashed flex items-start gap-2.5 mt-0.5 ${
-                  allWaypointsVisited 
-                    ? 'bg-emerald-50 border-emerald-500/30' 
-                    : 'bg-red-50/50 border-red-500/10'
-                }`}>
-                  <Home className={`w-4 h-4 shrink-0 ${allWaypointsVisited ? 'text-emerald-800' : 'text-red-700 animate-pulse'}`} />
-                  <div>
-                    <span className="text-[9px] font-sans font-black uppercase tracking-wider block leading-none mb-0.5">Ms. Eleanor's Cottage</span>
-                    <p className="text-[9px] leading-tight font-serif text-editorial-ink/75">
-                      {allWaypointsVisited 
-                        ? "UNLOCKED! Head to the cottage steps (H) for your safe haven."
-                        : "LOCKED. Complete all 4 landmarks first."
-                      }
-                    </p>
+          {/* Waypoint Clickable HUD Buttons */}
+          {WAYPOINTS.map((wp) => {
+            const isVisited = status.visitedPoints.includes(wp.id);
+            const isActive = activeWaypointId === wp.id;
+            
+            return (
+              <button
+                key={wp.id}
+                id={`waypoint-${wp.id}`}
+                onClick={() => handleWaypointClick(wp)}
+                onMouseEnter={() => {
+                  if (!isTraveling) setActiveWaypointId(wp.id);
+                }}
+                onMouseLeave={() => setActiveWaypointId(null)}
+                className="absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 flex flex-col items-center"
+              >
+                <div className="relative group">
+                  <div className="absolute inset-0 rounded-full bg-editorial-ink/20 scale-125 blur-xs group-hover:scale-150 transition-all"></div>
+                  <div className="w-8 h-8 rounded-full border border-editorial-ink flex items-center justify-center bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink hover:text-editorial-bg font-sans font-black text-xs transition-colors shadow-sm">
+                    {isVisited ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-800" />
+                    ) : wp.id === 'house' ? (
+                      <Home className="w-4 h-4 text-rose-700 animate-pulse" />
+                    ) : (
+                      wp.id.charAt(0).toUpperCase()
+                    )}
                   </div>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
+                {isActive && (
+                  <div className="absolute top-10 bg-editorial-bg border border-editorial-ink p-2 shadow-md w-32 rounded-xs pointer-events-none text-left z-30">
+                    <h4 className="text-[9px] font-sans font-black text-editorial-ochre uppercase tracking-wider">{wp.name}</h4>
+                    <p className="text-[8px] leading-tight font-serif text-editorial-ink mt-0.5">{wp.description}</p>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+
+          {/* Floating DOM interactions for treat items (Marked visually as standalone pawprint indicators) */}
+          {TREAT_LOCATIONS.map((treat) => {
+            const isCollected = collectedTreatIds.includes(treat.id);
+            if (isCollected) return null;
+            const isHovered = activeTreatId === treat.id;
+
+            return (
+              <div
+                key={treat.id}
+                id={`treat-node-${treat.id}`}
+                onMouseEnter={() => setActiveTreatId(treat.id)}
+                onMouseLeave={() => setActiveTreatId(null)}
+                onClick={() => handleTreatClick(treat)}
+                className="absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center text-amber-600 hover:text-amber-500 cursor-pointer"
+              >
+                {/* Paw icon explicitly used for treat encounters */}
+                <div className="relative p-1.5 bg-amber-950/90 border border-amber-500 rounded-full shadow-lg hover:scale-110 transition-transform">
+                  <PawPrint className="w-4 h-4 animate-pulse" />
+                </div>
+
+                {isHovered && (
+                  <div className="absolute top-9 bg-amber-950 border-2 border-amber-500 p-2 shadow-md w-28 rounded-sm pointer-events-none text-left z-30">
+                    <h4 className="text-[9px] font-sans font-black text-amber-400 uppercase tracking-wider">{treat.name} Snack</h4>
+                    <p className="text-[8px] leading-tight font-sans text-amber-200 mt-0.5">{treat.effectLabel}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
+
+        {/* Toolbar - Zoom Adjust Controls */}
+        <div className="absolute top-4 left-4 z-30 flex flex-col gap-1.5" id="map-zoom-controls">
+          <button
+            onClick={handleZoomIn}
+            className="bg-editorial-bg hover:bg-editorial-ochre border border-editorial-ink shadow-[2px_2px_0px_#2D2A26] text-editorial-ink w-5 h-5 flex items-center justify-center font-sans font-black text-xs transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg"
+            title="Zoom In"
+          >
+            +
+          </button>
+          <button
+            onClick={handleZoomOut}
+            className="bg-editorial-bg hover:bg-editorial-ochre border border-editorial-ink shadow-[2px_2px_0px_#2D2A26] text-editorial-ink w-5 h-5 flex items-center justify-center font-sans font-black text-xs transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg"
+            title="Zoom Out"
+          >
+            −
+          </button>
+        </div>
+
+        {/* Toolbar - Mute Sound effects */}
+        <div className="absolute top-[68px] left-4 z-30 flex flex-col shadow-[2px_2px_0px_#2D2A26] border border-editorial-ink" id="map-sound-controls">
+          <button
+            onClick={handleToggleMute}
+            className="bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink w-5 h-5 flex items-center justify-center transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg"
+            title={isMuted ? 'Unmute game' : 'Mute game'}
+          >
+            {isMuted ? <VolumeX className="w-3 h-3 text-editorial-ink" /> : <Volume2 className="w-3 h-3 text-editorial-ink" />}
+          </button>
+        </div>
+
+
+
+        {/* Toolbar - Collapsable Instruction box */}
+        <div 
+          onClick={() => setInstructionExpanded(!instructionExpanded)}
+          className="absolute top-4 left-[44px] z-20 bg-editorial-bg/90 backdrop-blur-xs border border-editorial-ink/30 px-3 py-1.5 shadow-xs flex items-center gap-2 max-w-[420px] cursor-pointer hover:bg-[#faf5ec] transition-colors select-none"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 text-editorial-ochre shrink-0 animate-pulse" />
+          {instructionExpanded ? (
+            <p className="text-[9.5px] leading-tight font-sans text-editorial-ink font-medium">
+              Use <strong>ARROW keys</strong> or <strong>W/A/S/D</strong> to guide {status.name}. Or click nodes to walk automatically. <span className="text-[#b45309] font-black ml-1.5 hover:underline">[COLLAPSE]</span>
+            </p>
+          ) : (
+            <span className="text-[8.5px] font-sans font-black text-editorial-ink uppercase tracking-wider">GUIDE &bull; EXPAND</span>
+          )}
+        </div>
+
+        {/* Near Waypoint Banner Prompt */}
+        <AnimatePresence>
+          {nearWaypoint && !isTraveling && (
+            <motion.div
+              initial={{ opacity: 0, y: 30, x: '-50%' }}
+              animate={{ opacity: 1, y: 0, x: '-50%' }}
+              exit={{ opacity: 0, y: 30, x: '-50%' }}
+              className="absolute bottom-6 left-1/2 transform -translate-x-1/2 parchment-panel px-5 py-3 z-30 flex items-center gap-3"
+            >
+              <div className="w-2.5 h-2.5 bg-editorial-ochre animate-ping rounded-full shrink-0"></div>
+              <span className="text-[10px] font-sans font-black uppercase tracking-wider text-editorial-ink whitespace-nowrap">
+                Near {nearWaypoint.name}. Press <span className="px-1.5 py-0.5 bg-editorial-ink text-editorial-bg rounded-sm font-mono text-[9px] mx-0.5">SPACE</span> or <span className="px-1.5 py-0.5 bg-editorial-ink text-editorial-bg rounded-sm font-mono text-[9px] mx-0.5">ENTER</span> to explore!
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Auto-traveling overlay block - positioned next to Quest button */}
+        {isTraveling && travelTarget && (
+          <div className="absolute top-4 right-[156px] bg-editorial-bg border border-editorial-ink px-3 py-1.5 z-20 shadow-xs flex items-center gap-2 text-[10px] font-sans font-black text-editorial-ochre uppercase tracking-wider animate-pulse">
+            <Navigation className="w-3.5 h-3.5 animate-spin text-editorial-ink" />
+            <span>{exhausted ? 'CRAWLING TO' : 'GUIDING TO'}: {travelTarget.name}</span>
+          </div>
+        )}
+
+        {/* Hypothermia warning overlay */}
+        {status.hypothermia && (
+          <div className="absolute bottom-4 right-4 z-30 bg-cyan-950/90 border border-cyan-300 text-cyan-100 px-3 py-1.5 text-[9px] font-sans font-black uppercase tracking-wider shadow-md">
+            Hypothermia: AP recovery halved
+          </div>
+        )}
+
+        {/* Bottom Left Soundtrack Controller */}
+        <div className="absolute bottom-4 left-4 z-30">
+          <MusicController
+            playing={musicPlaying}
+            setPlaying={setMusicPlaying}
+            volume={musicVolume}
+            setVolume={setMusicVolume}
+            muted={musicMuted}
+            setMuted={setMusicMuted}
+            theme="map"
+            align="left"
+            direction="up"
+          />
+        </div>
+        {/* Right Side: Active Quests Toggle Button */}
+        <button
+          id="quest-button"
+          onClick={() => setQuestsOpen(!questsOpen)}
+          className="saga-button absolute top-4 right-4 z-30 px-1.5 py-1 transition-all flex items-center justify-between gap-1 cursor-pointer select-none w-[130px] h-10"
+          title="View Active Quests"
+        >
+          <div className="w-6 h-6 flex items-center justify-center shrink-0 bg-editorial-beige border border-editorial-ink/10 relative overflow-hidden rounded-xs p-0.5">
+            <img
+              src={questImgSrc}
+              alt="Quests"
+              className={`w-full h-full object-contain transition-transform duration-200 hover:scale-105 ${questImgFailed ? 'opacity-0 absolute' : 'opacity-100'}`}
+              onError={() => {
+                if (questImgSrc === '/quest.png') {
+                  setQuestImgSrc('/quest-1.png');
+                } else {
+                  setQuestImgFailed(true);
+                }
+              }}
+            />
+            {questImgFailed && (
+              <CheckCircle2 className="w-3.5 h-3.5 text-editorial-ochre animate-pulse" />
+            )}
+          </div>
+          <div className="flex flex-col text-left">
+            <span className="text-[6.5px] font-sans font-black text-editorial-ochre uppercase tracking-wider leading-none mb-0.5">ACTIVE</span>
+            <span className="text-[9px] font-sans font-black text-editorial-ink leading-none tracking-wide">QUESTS</span>
+          </div>
+          <span className="bg-editorial-ink text-editorial-bg text-[8px] font-sans font-black px-1 py-0.5 ml-0.5 rounded-xs shrink-0">
+            {status.visitedPoints.length}/4
+          </span>
+          {/* Green Indicator Tag */}
+          <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 border border-emerald-600 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse z-20"></span>
+        </button>
+
+        {/* Active Quests & Loot Sidebar Overlay */}
+        <AnimatePresence>
+          {questsOpen && (
+            <motion.div
+              ref={questDropdownRef}
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              className="parchment-panel absolute top-[58px] right-4 w-[340px] z-40 p-4 flex flex-col gap-4 text-editorial-ink shadow-2xl"
+              id="objectives-widget"
+            >
+              {/* Header */}
+              <div className="border-b border-editorial-ink/20 pb-2 flex justify-between items-center">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 bg-editorial-ochre inline-block"></span>
+                  <h3 className="text-xs font-sans font-black text-editorial-ochre uppercase tracking-widest">ACTIVE QUESTS</h3>
+                </div>
+                <button
+                  onClick={() => setQuestsOpen(false)}
+                  className="text-editorial-ink hover:text-editorial-ochre p-1 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Description */}
+              <p className="text-[10.5px] font-serif text-editorial-ink/80 italic leading-relaxed">
+                Ms. Eleanor's cottage steps are locked. You must explore all four outer landmarks before her porch unlocks.
+              </p>
+
+              {/* Waypoint Checklist */}
+              <ul className="flex flex-col gap-2 font-sans text-xs">
+                {WAYPOINTS.filter(wp => wp.id !== 'house' && wp.id !== 'pond').map((wp) => {
+                  const isFound = status.visitedPoints.includes(wp.id);
+                  return (
+                    <li
+                      key={wp.id}
+                      onClick={() => {
+                        if (!isTraveling) {
+                          handleWaypointClick(wp);
+                        }
+                      }}
+                      className="flex items-center gap-2.5 py-1.5 px-1.5 border border-transparent hover:border-editorial-ink/10 hover:bg-[#faf5ec] cursor-pointer transition-all group rounded-sm"
+                    >
+                      {/* Checkbox circles matching the design: checked teal, unchecked neutral */}
+                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                        isFound 
+                          ? 'border-teal-600 bg-teal-50 text-teal-600' 
+                          : 'border-[#b5a695] bg-[#faf6f0]'
+                      }`}>
+                        {isFound && <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 fill-teal-50" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className={`font-black text-[9.5px] uppercase tracking-wider block ${
+                          isFound ? 'line-through text-stone-500' : 'text-editorial-ink'
+                        }`}>
+                          {wp.name}
+                        </span>
+                      </div>
+                      {!isFound && (
+                        <span className="text-[8px] font-sans font-black text-editorial-ochre opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-wider">
+                          Go &rarr;
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {/* LOOT / Inventory Section inside sidebar */}
+              <div className="border-t border-[#d6c7b3] pt-3 mt-1">
+                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-editorial-ochre mb-2">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 bg-[#b45309] inline-block"></span>
+                    LOOT
+                  </span>
+                  <span>{status.inventory.length}/5</span>
+                </div>
+                {status.inventory.length > 0 ? (
+                  <div className="flex flex-col gap-2 max-h-[190px] overflow-y-auto pr-0.5">
+                    {status.inventory.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => onUseItem(item.id)}
+                        className="w-full text-left p-3 border border-[#f4c37c]/35 bg-gradient-to-r from-[#2a170f] to-[#42261a] hover:from-[#3a2217] hover:to-[#523122] transition-colors shadow-md rounded-xs cursor-pointer group flex flex-col justify-center"
+                        title={`Consume ${item.name}`}
+                      >
+                        <span className="font-sans font-black text-[9px] text-[#ffe0ad] tracking-wider block mb-0.5 uppercase">
+                          {item.name}
+                        </span>
+                        <span className="font-sans font-bold text-[8px] text-[#f4c37c]/80 tracking-wide block uppercase">
+                          {item.effectLabel}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[9px] font-serif text-editorial-ink/65 italic">
+                    No survival loot collected. Explore points of interest!
+                  </p>
+                )}
+              </div>
+
+              {/* Cottage unlock indicator card */}
+              <div className={`p-2.5 border flex items-start gap-2.5 mt-1 ${
+                allWaypointsVisited 
+                  ? 'bg-emerald-50 border-emerald-500/30 text-emerald-800' 
+                  : 'bg-[#faeae7] border-[#f3c2bc] text-red-800'
+              }`}>
+                <div className={`p-1.5 rounded-xs shrink-0 ${allWaypointsVisited ? 'bg-emerald-100 text-emerald-800' : 'bg-[#fcdcd8] text-red-700'}`}>
+                  <Home className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <span className="text-[9px] font-sans font-black uppercase tracking-wider block leading-none mb-1">
+                    Ms. Eleanor's Cottage
+                  </span>
+                  <p className="text-[9px] leading-tight font-serif text-stone-700">
+                    {allWaypointsVisited 
+                      ? "UNLOCKED! Head to the cottage steps (H) for your safe haven."
+                      : "LOCKED. Complete all 4 landmarks first."
+                    }
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

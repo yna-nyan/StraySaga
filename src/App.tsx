@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { CatStatus, GameState, InventoryItem, Waypoint } from './types';
 import { AvatarSelection } from './components/AvatarSelection';
 import { Prologue } from './components/Prologue';
@@ -6,6 +6,7 @@ import { GameMap } from './components/GameMap';
 import { ScenarioDialog } from './components/ScenarioDialog';
 import { Ending } from './components/Ending';
 import { AVATARS } from './data/storyData';
+import straySagaAudio from './assets/StraySaga_Audio.mp3';
 
 const INITIAL_STATUS: CatStatus = {
   name: 'Luna',
@@ -38,6 +39,41 @@ export default function App() {
   const [catCoords, setCatCoords] = useState<{ x: number; z: number }>({ x: 13.5, z: 75.7 });
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [endingMode, setEndingMode] = useState<'adopted' | 'defeated'>('adopted');
+
+  // Background Music Global State and Control
+  const [musicPlaying, setMusicPlaying] = useState<boolean>(false);
+  const [musicVolume, setMusicVolume] = useState<number>(0.5);
+  const [musicMuted, setMusicMuted] = useState<boolean>(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const player = new Audio(straySagaAudio);
+    player.loop = true;
+    audioRef.current = player;
+
+    return () => {
+      player.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    audioRef.current.volume = musicVolume;
+    audioRef.current.muted = musicMuted;
+  }, [musicVolume, musicMuted]);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    if (musicPlaying) {
+      audioRef.current.play().catch(err => {
+        console.warn("Audio playback was prevented by browser autoplay policy. User gesture is required.", err);
+        setMusicPlaying(false);
+      });
+    } else {
+      audioRef.current.pause();
+    }
+  }, [musicPlaying]);
 
   // Character selection callback
   const handleAvatarSelected = (name: string, avatarId: string) => {
@@ -219,7 +255,15 @@ export default function App() {
       id="stray-saga-game-root"
     >
       {gameState === 'SELECTION' && (
-        <AvatarSelection onSelect={handleAvatarSelected} />
+        <AvatarSelection 
+          onSelect={handleAvatarSelected} 
+          musicPlaying={musicPlaying}
+          setMusicPlaying={setMusicPlaying}
+          musicVolume={musicVolume}
+          setMusicVolume={setMusicVolume}
+          musicMuted={musicMuted}
+          setMusicMuted={setMusicMuted}
+        />
       )}
 
       {gameState === 'PROLOGUE' && (
@@ -227,6 +271,12 @@ export default function App() {
           catName={catStatus.name} 
           avatarId={catStatus.avatarId} 
           onComplete={handlePrologueComplete} 
+          musicPlaying={musicPlaying}
+          setMusicPlaying={setMusicPlaying}
+          musicVolume={musicVolume}
+          setMusicVolume={setMusicVolume}
+          musicMuted={musicMuted}
+          setMusicMuted={setMusicMuted}
         />
       )}
 
@@ -239,6 +289,12 @@ export default function App() {
           onTravelCost={handleTravelCost}
           onUseItem={handleUseItem}
           onCollectTreat={handleCollectTreat}
+          musicPlaying={musicPlaying}
+          setMusicPlaying={setMusicPlaying}
+          musicVolume={musicVolume}
+          setMusicVolume={setMusicVolume}
+          musicMuted={musicMuted}
+          setMusicMuted={setMusicMuted}
         />
       )}
 
@@ -253,6 +309,12 @@ export default function App() {
             onTravelCost={() => {}}
             onUseItem={() => {}}
             onCollectTreat={() => {}}
+            musicPlaying={musicPlaying}
+            setMusicPlaying={setMusicPlaying}
+            musicVolume={musicVolume}
+            setMusicVolume={setMusicVolume}
+            musicMuted={musicMuted}
+            setMusicMuted={setMusicMuted}
           />
           <ScenarioDialog 
             scenarioId={activeScenarioId} 
@@ -271,6 +333,12 @@ export default function App() {
           mode={endingMode}
           hope={catStatus.hope}
           onRestart={handleRestart} 
+          musicPlaying={musicPlaying}
+          setMusicPlaying={setMusicPlaying}
+          musicVolume={musicVolume}
+          setMusicVolume={setMusicVolume}
+          musicMuted={musicMuted}
+          setMusicMuted={setMusicMuted}
         />
       )}
     </div>

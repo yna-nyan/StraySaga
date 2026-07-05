@@ -3,11 +3,18 @@ import { CatIcon } from './CatIcon';
 import { motion, AnimatePresence } from 'motion/react';
 import { audio } from '../utils/audio';
 import { VolumeX, Volume2, ArrowRight } from 'lucide-react';
+import { MusicController } from './MusicController';
 
 interface PrologueProps {
   catName: string;
   avatarId: string;
   onComplete: () => void;
+  musicPlaying: boolean;
+  setMusicPlaying: (playing: boolean) => void;
+  musicVolume: number;
+  setMusicVolume: (volume: number) => void;
+  musicMuted: boolean;
+  setMusicMuted: (muted: boolean) => void;
 }
 
 interface Ember {
@@ -21,7 +28,17 @@ interface Ember {
   color: string;
 }
 
-export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplete }) => {
+export const Prologue: React.FC<PrologueProps> = ({
+  catName,
+  avatarId,
+  onComplete,
+  musicPlaying,
+  setMusicPlaying,
+  musicVolume,
+  setMusicVolume,
+  musicMuted,
+  setMusicMuted
+}) => {
   const [step, setStep] = useState<number>(0);
   const [flashScreen, setFlashScreen] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(audio.getMuted());
@@ -174,6 +191,16 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
 
       {/* Utilities */}
       <div className="absolute top-6 right-6 z-30 flex items-center gap-3">
+        <MusicController
+          playing={musicPlaying}
+          setPlaying={setMusicPlaying}
+          volume={musicVolume}
+          setVolume={setMusicVolume}
+          muted={musicMuted}
+          setMuted={setMusicMuted}
+          theme="parchment"
+          align="right"
+        />
         <button
           onClick={toggleMute}
           className="saga-button p-2 transition-colors cursor-pointer"
