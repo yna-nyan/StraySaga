@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { CatIcon } from './CatIcon';
 import { motion, AnimatePresence } from 'motion/react';
 import { audio } from '../utils/audio';
@@ -10,10 +10,22 @@ interface PrologueProps {
   onComplete: () => void;
 }
 
+interface Ember {
+  x: number;
+  y: number;
+  size: number;
+  speedX: number;
+  speedY: number;
+  alpha: number;
+  decay: number;
+  color: string;
+}
+
 export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplete }) => {
   const [step, setStep] = useState<number>(0);
   const [flashScreen, setFlashScreen] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(audio.getMuted());
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     audio.playTrafficAmbience();
@@ -38,6 +50,93 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [step, onComplete]);
+
+  // Smooth Canvas-based Fireplace Ember Particle System
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    let embers: Ember[] = [];
+
+    const resizeCanvas = () => {
+      canvas.width = canvas.parentElement?.clientWidth || window.innerWidth;
+      canvas.height = canvas.parentElement?.clientHeight || window.innerHeight;
+    };
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    const colors = [
+      'rgba(245, 158, 11, ',  // Amber-500
+      'rgba(249, 115, 22, ',  // Orange-500
+      'rgba(234, 179, 8, ',   // Yellow-500
+      'rgba(239, 68, 68, '    // Red-500
+    ];
+
+    const createEmber = (): Ember => {
+      return {
+        x: Math.random() * canvas.width,
+        y: canvas.height + Math.random() * 20,
+        size: Math.random() * 2.5 + 0.5,
+        speedY: -(Math.random() * 1.5 + 0.8),
+        speedX: (Math.random() - 0.5) * 0.8,
+        alpha: Math.random() * 0.5 + 0.5,
+        decay: Math.random() * 0.003 + 0.002,
+        color: colors[Math.floor(Math.random() * colors.length)]
+      };
+    };
+
+    // Pre-populate system
+    for (let i = 0; i < 40; i++) {
+      const ember = createEmber();
+      ember.y = Math.random() * canvas.height;
+      embers.push(ember);
+    }
+
+    // 60fps animation loop
+    const render = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (embers.length < 85) {
+        embers.push(createEmber());
+      }
+
+      for (let i = embers.length - 1; i >= 0; i--) {
+        const e = embers[i];
+        
+        e.y += e.speedY;
+        e.x += e.speedX;
+        e.speedX += (Math.random() - 0.5) * 0.05; 
+        e.alpha -= e.decay;
+
+        if (e.alpha <= 0 || e.y < -10 || e.x < -10 || e.x > canvas.width + 10) {
+          embers.splice(i, 1);
+          continue;
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+        ctx.fillStyle = `${e.color}${e.alpha})`;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = 'rgba(249, 115, 22, 0.4)';
+        ctx.fill();
+        ctx.restore();
+      }
+
+      animationFrameId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, []);
 
   const handleNext = () => {
     if (step === 0) {
@@ -66,6 +165,12 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
         <div className="w-[1px] h-full bg-editorial-ink"></div>
         <div className="w-[1px] h-full bg-editorial-ink"></div>
       </div>
+
+      {/* Ultra-Smooth HTML5 Canvas Particle Engine for Dispersing Sparks */}
+      <canvas 
+        ref={canvasRef} 
+        className="absolute inset-0 w-full h-full pointer-events-none z-0 opacity-40"
+      />
 
       {/* Utilities */}
       <div className="absolute top-6 right-6 z-30 flex items-center gap-3">
@@ -103,8 +208,55 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
           </div>
         </div>
 
-        {/* Text Story Frame */}
-        <div className="parchment-panel flex-1 p-6 md:p-8 max-w-2xl">
+        {/* Text Story Frame with Integrated Swirly Corners */}
+        <div className="parchment-panel flex-1 p-6 md:p-8 max-w-2xl relative overflow-hidden">
+          
+          {/* ===== INSIDE SWIRLY CORNERS ===== */}
+          {/* Left Top Swirly Corner */}
+          <div className="absolute top-1 left-1 w-14 h-14 pointer-events-none z-20 overflow-visible">
+            <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+              <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+              <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+              <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+            </svg>
+          </div>
+          
+          {/* Right Top Swirly Corner */}
+          <div className="absolute top-1 right-1 w-14 h-14 pointer-events-none z-20 overflow-visible transform scale-x-[-1]">
+            <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+              <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+              <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+              <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+            </svg>
+          </div>
+          
+          {/* Left Bottom Swirly Corner */}
+          <div className="absolute bottom-1 left-1 w-14 h-14 pointer-events-none z-20 overflow-visible transform scale-y-[-1]">
+            <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+              <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+              <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+              <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+            </svg>
+          </div>
+          
+          {/* Right Bottom Swirly Corner */}
+          <div className="absolute bottom-1 right-1 w-14 h-14 pointer-events-none z-20 overflow-visible transform scale-x-[-1] scale-y-[-1]">
+            <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+              <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+              <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+              <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+              <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+            </svg>
+          </div>
+          {/* ================================= */}
+
           <AnimatePresence mode="wait">
             {step === 0 ? (
               <motion.div
@@ -112,7 +264,7 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -5 }}
-                className="space-y-4"
+                className="space-y-4 px-2 pt-2"
               >
                 <div className="text-[10px] font-sans font-black text-editorial-ochre uppercase tracking-widest">The Scene Setting</div>
                 <p className="text-editorial-ink text-base md:text-lg leading-relaxed font-sans">
@@ -128,7 +280,7 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -5 }}
-                className="space-y-4"
+                className="space-y-4 px-2 pt-2"
               >
                 <div className="text-[10px] font-sans font-black text-editorial-ochre uppercase tracking-widest flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 bg-editorial-ink rounded-full"></span>
@@ -142,7 +294,7 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
           </AnimatePresence>
 
           {/* Controls inside box */}
-          <div className="mt-8 flex justify-end border-t border-editorial-ink/10 pt-4">
+          <div className="mt-8 flex justify-end border-t border-editorial-ink/10 pt-4 relative z-30">
             <button
               onClick={handleNext}
               id="prologue-next-btn"
@@ -185,7 +337,7 @@ export const Prologue: React.FC<PrologueProps> = ({ catName, avatarId, onComplet
               className="text-xs md:text-sm font-sans font-bold tracking-[0.2em] text-editorial-ochre uppercase mt-4"
             >
               Explore the city map and gather clues to survive...
-			</motion.p>
+            </motion.p>
           </motion.div>
         )}
       </AnimatePresence>

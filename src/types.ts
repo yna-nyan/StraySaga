@@ -38,6 +38,7 @@ export interface CatStatus {
   inventory: InventoryItem[];
   hypothermia: boolean;
   visitedPoints: string[]; // list of visited point IDs
+  collectedTreats?: string[]; // list of collected treat IDs
 }
 
 export interface InventoryItem {

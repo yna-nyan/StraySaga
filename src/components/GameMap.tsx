@@ -15,19 +15,34 @@ import {
   VolumeX,
   AlertTriangle,
   Home,
-  ArrowRight,
-  Info,
-  ZoomIn,
-  ZoomOut,
-  ChevronDown,
-  ChevronUp,
-  X
+  X,
+  PawPrint
 } from 'lucide-react';
 import {
   drawProceduralMapCanvas,
   createCatTextureCanvas,
   createWaypointTextureCanvas
 } from '../utils/mapHelpers';
+
+// Interface defining the scattered treat positions and state
+interface TreatEncounter {
+  id: string;
+  name: 'tuna' | 'kibble';
+  x: number;
+  z: number;
+  energyValue: number;
+  effectLabel: string;
+}
+
+// 5 Dedicated Treat Encounter locations scattered across the 100x100 board coordinates
+// Energy ranges from 15-35 energy points only as requested
+const TREAT_LOCATIONS: TreatEncounter[] = [
+  { id: 'treat_alley_1', name: 'tuna', x: 25.0, z: 30.0, energyValue: 20, effectLabel: '+20 Energy' },
+  { id: 'treat_alley_2', name: 'kibble', x: 70.0, z: 20.0, energyValue: 15, effectLabel: '+15 Energy' },
+  { id: 'treat_alley_3', name: 'tuna', x: 45.0, z: 65.0, energyValue: 35, effectLabel: '+35 Energy' },
+  { id: 'treat_alley_4', name: 'kibble', x: 15.0, z: 85.0, energyValue: 25, effectLabel: '+25 Energy' },
+  { id: 'treat_alley_5', name: 'tuna', x: 85.0, z: 70.0, energyValue: 30, effectLabel: '+30 Energy' },
+];
 
 interface GameMapProps {
   status: CatStatus;
@@ -36,6 +51,7 @@ interface GameMapProps {
   onUnlockEnding: () => void;
   onTravelCost: (distance: number, terrain?: 'clear' | 'complex') => void;
   onUseItem: (itemId: string) => void;
+  onCollectTreat?: (item: { id: string; name: string; effectLabel: string; energy: number }) => void; 
 }
 
 export const GameMap: React.FC<GameMapProps> = ({
@@ -44,7 +60,8 @@ export const GameMap: React.FC<GameMapProps> = ({
   onVisitWaypoint,
   onUnlockEnding,
   onTravelCost,
-  onUseItem
+  onUseItem,
+  onCollectTreat
 }) => {
   // Sync state coordinates for HUD display
   const [currentX, setCurrentX] = useState<number>(initialCoords?.x ?? 13.5);
@@ -53,7 +70,13 @@ export const GameMap: React.FC<GameMapProps> = ({
   const [travelTarget, setTravelTarget] = useState<Waypoint | null>(null);
   const [nearWaypoint, setNearWaypoint] = useState<Waypoint | null>(null);
   
+  // Track collected treats to avoid rendering or interacting with them twice
+  const [collectedTreatIds, setCollectedTreatIds] = useState<string[]>(() => {
+    return status.collectedTreats ?? [];
+  });
+
   const [activeWaypointId, setActiveWaypointId] = useState<string | null>(null);
+  const [activeTreatId, setActiveTreatId] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState<boolean>(false);
@@ -104,10 +127,8 @@ export const GameMap: React.FC<GameMapProps> = ({
   }, [initialCoords]);
 
   // Zoom control state & ref
-  const [zoomLevel, setZoomLevel] = useState<number>(50); // camera.position.y (default 50)
+  const [zoomLevel, setZoomLevel] = useState<number>(50); 
   const zoomLevelRef = useRef(50);
-
-  const [objectivesCollapsed, setObjectivesCollapsed] = useState<boolean>(false);
 
   const handleZoomIn = () => {
     setZoomLevel((prev) => {
@@ -141,9 +162,13 @@ export const GameMap: React.FC<GameMapProps> = ({
   const statusRef = useRef(status);
   const travelStartRef = useRef<{ x: number; z: number } | null>(null);
   const manualTravelDebtRef = useRef(0);
+  const collectedTreatsRef = useRef<string[]>([]);
 
   useEffect(() => {
     statusRef.current = status;
+    const currentTreats = status.collectedTreats ?? [];
+    collectedTreatsRef.current = currentTreats;
+    setCollectedTreatIds(currentTreats);
   }, [status]);
 
   // Three.js instances
@@ -152,13 +177,14 @@ export const GameMap: React.FC<GameMapProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const catMeshRef = useRef<THREE.Group | null>(null);
   const cameraTargetRef = useRef(new THREE.Vector3(50, 0, 50));
+  const treatMeshesGroupRef = useRef<Record<string, THREE.Group>>({});
 
   // Initialize and update keyboard arrow listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 's', 'a', 'd', ' ', 'Enter'];
       if (keys.includes(e.key)) {
-        e.preventDefault(); // Stop page scrolling
+        e.preventDefault(); 
       }
       
       const keyMap: Record<string, string> = {
@@ -173,7 +199,6 @@ export const GameMap: React.FC<GameMapProps> = ({
         keysRef.current[mapped] = true;
       }
 
-      // Space or Enter to interact if close to a waypoint
       if ((e.key === ' ' || e.key === 'Enter') && nearWaypointRef.current && !isTravelingRef.current) {
         handleWaypointClick(nearWaypointRef.current);
       }
@@ -219,13 +244,45 @@ export const GameMap: React.FC<GameMapProps> = ({
       }
     }
 
-    // Start auto-walking toward the waypoint
     audio.playPurr();
     travelStartRef.current = { x: catPosRef.current.x, z: catPosRef.current.z };
     travelTargetRef.current = waypoint;
     setTravelTarget(waypoint);
     isTravelingRef.current = true;
     setIsTraveling(true);
+  };
+
+  // Automated/manual collision pickup handler for treats
+  const handleCollectTreatItem = (treat: TreatEncounter) => {
+    if (collectedTreatsRef.current.includes(treat.id)) return;
+
+    audio.playPurr();
+    const dynamicCollected = [...collectedTreatsRef.current, treat.id];
+    collectedTreatsRef.current = dynamicCollected;
+    setCollectedTreatIds(dynamicCollected);
+
+    // Remove ONLY this specific 3D mesh representation from the scene
+    const meshGroup = treatMeshesGroupRef.current[treat.id];
+    if (meshGroup && sceneRef.current) {
+      sceneRef.current.remove(meshGroup);
+    }
+
+    if (onCollectTreat) {
+      onCollectTreat({
+        id: treat.id,
+        name: treat.name,
+        effectLabel: treat.effectLabel,
+        energy: treat.energyValue
+      });
+    } else {
+      status.inventory.push({
+        id: treat.id,
+        name: treat.name,
+        effectLabel: treat.effectLabel,
+        energy: treat.energyValue,
+        kind: 'consumable'
+      });
+    }
   };
 
   // Toggle audio
@@ -239,6 +296,33 @@ export const GameMap: React.FC<GameMapProps> = ({
     }
   };
 
+  // Helper inside setup to generate a canvas texture for the Treat Pawprint markers
+  const createTreatPawTexture = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    
+    ctx.fillStyle = '#D97706'; // Golden amber color for treat paw prints
+    
+    // Main Pad
+    ctx.beginPath();
+    ctx.ellipse(32, 40, 12, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // 4 Toes
+    ctx.beginPath();
+    ctx.arc(18, 26, 4, 0, Math.PI * 2);
+    ctx.arc(27, 18, 4.5, 0, Math.PI * 2);
+    ctx.arc(37, 18, 4.5, 0, Math.PI * 2);
+    ctx.arc(46, 26, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+
   // Initialize Three.js Scene
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -246,19 +330,16 @@ export const GameMap: React.FC<GameMapProps> = ({
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
 
-    // 1. Scene
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // 2. Camera
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
     cameraRef.current = camera;
-    camera.up.set(0, 0, -1); // Keep top-down 2D orientation (no flip or rotation)
+    camera.up.set(0, 0, -1); 
     cameraTargetRef.current.set(catPosRef.current.x, 0, catPosRef.current.z);
     camera.position.set(catPosRef.current.x, zoomLevelRef.current, catPosRef.current.z);
     camera.lookAt(cameraTargetRef.current);
 
-    // 3. Renderer
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
       antialias: true,
@@ -268,7 +349,6 @@ export const GameMap: React.FC<GameMapProps> = ({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     rendererRef.current = renderer;
 
-    // 4. Lights
     const ambientLight = new THREE.AmbientLight('#FFFDF5', 1.3);
     scene.add(ambientLight);
 
@@ -276,7 +356,6 @@ export const GameMap: React.FC<GameMapProps> = ({
     dirLight.position.set(50, 80, 50);
     scene.add(dirLight);
 
-    // 5. Board Ground Plane
     const groundGeo = new THREE.PlaneGeometry(100, 100);
     const proceduralCanvas = drawProceduralMapCanvas();
     const proceduralTexture = new THREE.CanvasTexture(proceduralCanvas);
@@ -284,11 +363,10 @@ export const GameMap: React.FC<GameMapProps> = ({
 
     const groundMaterial = new THREE.MeshBasicMaterial({ map: proceduralTexture });
     const groundMesh = new THREE.Mesh(groundGeo, groundMaterial);
-    groundMesh.rotation.x = -Math.PI / 2; // Flat on horizontal plane
-    groundMesh.position.set(50, 0, 50); // Move center of 100x100 to positive quad
+    groundMesh.rotation.x = -Math.PI / 2; 
+    groundMesh.position.set(50, 0, 50); 
     scene.add(groundMesh);
 
-    // Try loading custom base map from /public/map directory with validation
     const textureLoader = new THREE.TextureLoader();
 
     const loadBackupBasemap = () => {
@@ -307,25 +385,10 @@ export const GameMap: React.FC<GameMapProps> = ({
                   texJpg.colorSpace = THREE.SRGBColorSpace;
                   groundMaterial.map = texJpg;
                   groundMaterial.needsUpdate = true;
-                } else {
-                  console.log('No custom map uploaded or found. Using illustrated procedural tabletop board map.');
                 }
               }
             );
           }
-        },
-        undefined,
-        () => {
-          textureLoader.load(
-            '/map/basemap.jpg',
-            (texJpg) => {
-              if (texJpg.image && (texJpg.image.width > 1 || texJpg.image.naturalWidth > 1)) {
-                texJpg.colorSpace = THREE.SRGBColorSpace;
-                groundMaterial.map = texJpg;
-                groundMaterial.needsUpdate = true;
-              }
-            }
-          );
         }
       );
     };
@@ -347,15 +410,13 @@ export const GameMap: React.FC<GameMapProps> = ({
       }
     );
 
-    // 6. Waypoints 3D representation
+    // Waypoints 3D representation
     const waypointMeshes: THREE.Group[] = [];
-    const waypointRefsMap: Record<string, THREE.Group> = {};
 
     WAYPOINTS.forEach((wp) => {
       const group = new THREE.Group();
       group.position.set(wp.x, 0.1, wp.y);
 
-      // Rotating Ring flat on ground
       const ringGeo = new THREE.RingGeometry(1.8, 2.5, 24);
       const colorHex = wp.id === 'house' ? '#EF4444' : 
                        wp.id === 'rival' ? '#3B82F6' :
@@ -373,7 +434,6 @@ export const GameMap: React.FC<GameMapProps> = ({
       ringMesh.rotation.x = -Math.PI / 2;
       group.add(ringMesh);
 
-      // Cardboard Circle token on top
       const letter = wp.id === 'house' ? 'H' :
                      wp.id === 'rival' ? 'A' :
                      wp.id === 'pond' ? 'O' :
@@ -391,10 +451,9 @@ export const GameMap: React.FC<GameMapProps> = ({
         side: THREE.DoubleSide
       });
       const cardMesh = new THREE.Mesh(cardGeo, cardMat);
-      cardMesh.position.y = 3.5; // Raised slightly
+      cardMesh.position.y = 3.5; 
       group.add(cardMesh);
 
-      // Attempt to load custom paw texture if uploaded
       if (wp.id !== 'house') {
         textureLoader.load(
           '/map/paw.png',
@@ -403,48 +462,59 @@ export const GameMap: React.FC<GameMapProps> = ({
               pawTex.colorSpace = THREE.SRGBColorSpace;
               cardMat.map = pawTex;
               cardMat.needsUpdate = true;
-            } else {
-              // Try loading backup paws.png
-              textureLoader.load(
-                '/map/paws.png',
-                (pawsTex) => {
-                  if (pawsTex.image && (pawsTex.image.width > 1 || pawsTex.image.naturalWidth > 1)) {
-                    pawsTex.colorSpace = THREE.SRGBColorSpace;
-                    cardMat.map = pawsTex;
-                    cardMat.needsUpdate = true;
-                  }
-                }
-              );
             }
-          },
-          undefined,
-          () => {
-            textureLoader.load(
-              '/map/paws.png',
-              (pawsTex) => {
-                if (pawsTex.image && (pawsTex.image.width > 1 || pawsTex.image.naturalWidth > 1)) {
-                  pawsTex.colorSpace = THREE.SRGBColorSpace;
-                  cardMat.map = pawsTex;
-                  cardMat.needsUpdate = true;
-                }
-              },
-              undefined,
-              () => {}
-            );
           }
         );
       }
 
       scene.add(group);
       waypointMeshes.push(group);
-      waypointRefsMap[wp.id] = group;
     });
 
-    // 7. Player 3D Standee Base Group (crisp animated vector SVG is layered over this in HTML!)
+    // Spawn Treat Encounters as floating standalone pawprints on the map
+    const treatMeshes: THREE.Group[] = [];
+    treatMeshesGroupRef.current = {};
+    const treatPawTex = createTreatPawTexture();
+
+    TREAT_LOCATIONS.forEach((treat) => {
+      // If item is already taken, do not render it
+      if (collectedTreatsRef.current.includes(treat.id)) return;
+
+      const group = new THREE.Group();
+      group.position.set(treat.x, 0.1, treat.z);
+
+      // Glowing base circle shadow
+      const shadowGeo = new THREE.RingGeometry(0, 1.5, 16);
+      const shadowMat = new THREE.MeshBasicMaterial({
+        color: '#D97706',
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide
+      });
+      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+      shadowMesh.rotation.x = -Math.PI / 2;
+      group.add(shadowMesh);
+
+      // Distinct Pawprint Standee mesh to identify treats visually on map
+      const standeeGeo = new THREE.PlaneGeometry(2.4, 2.4);
+      const standeeMat = new THREE.MeshBasicMaterial({
+        map: treatPawTex,
+        transparent: true,
+        side: THREE.DoubleSide
+      });
+      const standeeMesh = new THREE.Mesh(standeeGeo, standeeMat);
+      standeeMesh.position.y = 2.0;
+      group.add(standeeMesh);
+
+      scene.add(group);
+      treatMeshes.push(group);
+      treatMeshesGroupRef.current[treat.id] = group;
+    });
+
+    // Player 3D Standee Base Group
     const catGroup = new THREE.Group();
     catGroup.position.set(catPosRef.current.x, 0, catPosRef.current.z);
 
-    // Small circular dark wood base cylinder
     const baseGeo = new THREE.CylinderGeometry(2.4, 2.4, 0.4, 16);
     const baseMat = new THREE.MeshStandardMaterial({
       color: '#4a3728',
@@ -454,7 +524,6 @@ export const GameMap: React.FC<GameMapProps> = ({
     baseMesh.position.y = 0.2;
     catGroup.add(baseMesh);
 
-    // Flat black shadow ring at the base of the cylinder
     const shadowGeo = new THREE.RingGeometry(0, 2.6, 16);
     const shadowMat = new THREE.MeshBasicMaterial({
       color: '#1a1813',
@@ -470,238 +539,6 @@ export const GameMap: React.FC<GameMapProps> = ({
     scene.add(catGroup);
     catMeshRef.current = catGroup;
 
-    // 8. Tabletop Environment Assets & Billboards
-    const billboards: THREE.Object3D[] = [];
-
-    // Helper to load image or backup, with beautiful low-poly fallback models
-    const loadBillboardOrFallback = (
-      imageUrl: string,
-      backupUrl: string,
-      fallbackCreator: () => THREE.Group,
-      x: number,
-      z: number,
-      w: number,
-      h: number
-    ) => {
-      const spawnFallback = () => {
-        const fallbackGroup = fallbackCreator();
-        fallbackGroup.position.set(x, 0, z);
-        scene.add(fallbackGroup);
-      };
-
-      const loadBackup = () => {
-        textureLoader.load(
-          backupUrl,
-          (texture) => {
-            if (texture.image && (texture.image.width > 1 || texture.image.naturalWidth > 1)) {
-              texture.colorSpace = THREE.SRGBColorSpace;
-              texture.minFilter = THREE.LinearFilter;
-              texture.magFilter = THREE.LinearFilter;
-              const mat = new THREE.MeshBasicMaterial({
-                map: texture,
-                transparent: true,
-                side: THREE.DoubleSide
-              });
-              const geo = new THREE.PlaneGeometry(w, h);
-              const mesh = new THREE.Mesh(geo, mat);
-              mesh.position.set(x, h / 2, z);
-              scene.add(mesh);
-              billboards.push(mesh);
-            } else {
-              spawnFallback();
-            }
-          },
-          undefined,
-          () => {
-            spawnFallback();
-          }
-        );
-      };
-
-      textureLoader.load(
-        imageUrl,
-        (texture) => {
-          if (texture.image && (texture.image.width > 1 || texture.image.naturalWidth > 1)) {
-            texture.colorSpace = THREE.SRGBColorSpace;
-            texture.minFilter = THREE.LinearFilter;
-            texture.magFilter = THREE.LinearFilter;
-            const mat = new THREE.MeshBasicMaterial({
-              map: texture,
-              transparent: true,
-              side: THREE.DoubleSide
-            });
-            const geo = new THREE.PlaneGeometry(w, h);
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(x, h / 2, z);
-            scene.add(mesh);
-            billboards.push(mesh);
-          } else {
-            loadBackup();
-          }
-        },
-        undefined,
-        () => {
-          loadBackup();
-        }
-      );
-    };
-
-    // Direct flat 2D decal loader for newly uploaded assets (non-3D, aligned parallel to ground map)
-    const loadDirectBillboard = (
-      imageUrl: string,
-      x: number,
-      z: number,
-      w: number,
-      h: number,
-      fallbackCreator?: () => THREE.Group
-    ) => {
-      textureLoader.load(
-        imageUrl,
-        (texture) => {
-          if (texture.image && (texture.image.width > 1 || texture.image.naturalWidth > 1)) {
-            texture.colorSpace = THREE.SRGBColorSpace;
-            texture.minFilter = THREE.LinearFilter;
-            texture.magFilter = THREE.LinearFilter;
-            const mat = new THREE.MeshBasicMaterial({
-              map: texture,
-              transparent: true,
-              side: THREE.DoubleSide,
-              depthWrite: false // prevents blocky outlines or overlapping clip boxes
-            });
-            const geo = new THREE.PlaneGeometry(w, h);
-            const mesh = new THREE.Mesh(geo, mat);
-            // Lay flat parallel to the ground board, slightly elevated to prevent z-fighting
-            mesh.position.set(x, 0.08, z);
-            mesh.rotation.x = -Math.PI / 2;
-            scene.add(mesh);
-          } else if (fallbackCreator) {
-            const fallbackGroup = fallbackCreator();
-            fallbackGroup.position.set(x, 0, z);
-            scene.add(fallbackGroup);
-          }
-        },
-        undefined,
-        () => {
-          if (fallbackCreator) {
-            const fallbackGroup = fallbackCreator();
-            fallbackGroup.position.set(x, 0, z);
-            scene.add(fallbackGroup);
-          }
-        }
-      );
-    };
-
-    // Low-poly cottage piece
-    const createHouseFallback = () => {
-      const group = new THREE.Group();
-      const bGeo = new THREE.BoxGeometry(6, 4, 5);
-      const bMat = new THREE.MeshStandardMaterial({ color: '#EBE7DD', roughness: 0.7 });
-      const baseObj = new THREE.Mesh(bGeo, bMat);
-      baseObj.position.y = 2;
-      group.add(baseObj);
-
-      const rGeo = new THREE.ConeGeometry(4.2, 2.8, 4);
-      const rMat = new THREE.MeshStandardMaterial({ color: '#8B0000', roughness: 0.8 });
-      const roofObj = new THREE.Mesh(rGeo, rMat);
-      roofObj.position.y = 5.4;
-      roofObj.rotation.y = Math.PI / 4;
-      group.add(roofObj);
-
-      const dGeo = new THREE.BoxGeometry(1.2, 2.2, 0.1);
-      const dMat = new THREE.MeshStandardMaterial({ color: '#4A3B32' });
-      const doorObj = new THREE.Mesh(dGeo, dMat);
-      doorObj.position.set(0, 1.1, 2.51);
-      group.add(doorObj);
-
-      const cGeo = new THREE.BoxGeometry(0.8, 2.2, 0.8);
-      const cMat = new THREE.MeshStandardMaterial({ color: '#696969' });
-      const chimneyObj = new THREE.Mesh(cGeo, cMat);
-      chimneyObj.position.set(1.8, 4.2, 1.0);
-      group.add(chimneyObj);
-      return group;
-    };
-
-    // Low-poly tree piece
-    const createTreeFallback = () => {
-      const group = new THREE.Group();
-      const tGeo = new THREE.CylinderGeometry(0.3, 0.5, 2.2, 8);
-      const tMat = new THREE.MeshStandardMaterial({ color: '#5C4033', roughness: 0.9 });
-      const trunkObj = new THREE.Mesh(tGeo, tMat);
-      trunkObj.position.y = 1.1;
-      group.add(trunkObj);
-
-      const fGeo1 = new THREE.ConeGeometry(1.8, 3.5, 8);
-      const fMat = new THREE.MeshStandardMaterial({ color: '#2E5A27', roughness: 0.8 });
-      const foliageObj1 = new THREE.Mesh(fGeo1, fMat);
-      foliageObj1.position.y = 3.5;
-      group.add(foliageObj1);
-
-      const fGeo2 = new THREE.ConeGeometry(1.3, 2.5, 8);
-      const foliageObj2 = new THREE.Mesh(fGeo2, fMat);
-      foliageObj2.position.y = 4.8;
-      group.add(foliageObj2);
-      return group;
-    };
-
-    // Low-poly car piece
-    const createCarFallback = () => {
-      const group = new THREE.Group();
-      const cGeo = new THREE.BoxGeometry(4, 1.2, 2);
-      const cMat = new THREE.MeshStandardMaterial({ color: '#B22222', roughness: 0.5 });
-      const carBase = new THREE.Mesh(cGeo, cMat);
-      carBase.position.y = 0.8;
-      group.add(carBase);
-
-      const cabGeo = new THREE.BoxGeometry(2.2, 1, 1.7);
-      const cabMat = new THREE.MeshStandardMaterial({ color: '#FDFCF5', roughness: 0.4 });
-      const cabObj = new THREE.Mesh(cabGeo, cabMat);
-      cabObj.position.set(-0.2, 1.8, 0);
-      group.add(cabObj);
-
-      const wGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.4, 12);
-      const wMat = new THREE.MeshStandardMaterial({ color: '#1A1A1A', roughness: 0.9 });
-      wGeo.rotateX(Math.PI / 2);
-
-      const wheelCoords = [
-        { x: -1.2, z: 1.0 }, { x: 1.2, z: 1.0 },
-        { x: -1.2, z: -1.0 }, { x: 1.2, z: -1.0 }
-      ];
-      wheelCoords.forEach(pos => {
-        const wheel = new THREE.Mesh(wGeo, wMat);
-        wheel.position.set(pos.x, 0.4, pos.z);
-        group.add(wheel);
-      });
-      return group;
-    };
-
-    // Low-poly bench piece
-    const createBenchFallback = () => {
-      const group = new THREE.Group();
-      const sGeo = new THREE.BoxGeometry(3, 0.15, 1.2);
-      const sMat = new THREE.MeshStandardMaterial({ color: '#8B5A2B', roughness: 0.9 });
-      const seatObj = new THREE.Mesh(sGeo, sMat);
-      seatObj.position.y = 0.8;
-      group.add(seatObj);
-
-      const bGeo = new THREE.BoxGeometry(3, 0.8, 0.15);
-      const backObj = new THREE.Mesh(bGeo, sMat);
-      backObj.position.set(0, 1.3, -0.5);
-      group.add(backObj);
-
-      const lGeo = new THREE.BoxGeometry(0.15, 0.8, 1.2);
-      const lMat = new THREE.MeshStandardMaterial({ color: '#2F4F4F', roughness: 0.7 });
-      const legL = new THREE.Mesh(lGeo, lMat);
-      legL.position.set(-1.4, 0.4, 0);
-      const legR = new THREE.Mesh(lGeo, lMat);
-      legR.position.set(1.4, 0.4, 0);
-      group.add(legL);
-      group.add(legR);
-      return group;
-    };
-
-    // Removed other decorative billboards per request to keep only wholemap, the kitty avatar, and points
-
-    // Projection calculation helper inside the loop context
     const project3DTo2D = (x: number, z: number) => {
       const vec = new THREE.Vector3(x, 0, z);
       vec.project(camera);
@@ -710,26 +547,22 @@ export const GameMap: React.FC<GameMapProps> = ({
       return { x: xPercent, y: yPercent };
     };
 
-    // Paw Print Texture Generator
-    const createPawTexture = () => {
+    const createPlayerTrailPawTexture = () => {
       const pawCanvas = document.createElement('canvas');
       pawCanvas.width = 64;
       pawCanvas.height = 64;
       const pawCtx = pawCanvas.getContext('2d')!;
+      pawCtx.fillStyle = '#2b1c11';
       
-      pawCtx.fillStyle = '#2b1c11'; // Muddy charcoal dark footprint color
-      
-      // Main Pad
       pawCtx.beginPath();
       pawCtx.ellipse(32, 40, 14, 10, 0, 0, Math.PI * 2);
       pawCtx.fill();
       
-      // 4 Toes
       pawCtx.beginPath();
-      pawCtx.arc(16, 26, 4.5, 0, Math.PI * 2); // Left-most
-      pawCtx.arc(26, 17, 5, 0, Math.PI * 2);   // Mid-left
-      pawCtx.arc(38, 17, 5, 0, Math.PI * 2);   // Mid-right
-      pawCtx.arc(48, 26, 4.5, 0, Math.PI * 2); // Right-most
+      pawCtx.arc(16, 26, 4.5, 0, Math.PI * 2); 
+      pawCtx.arc(26, 17, 5, 0, Math.PI * 2);   
+      pawCtx.arc(38, 17, 5, 0, Math.PI * 2);   
+      pawCtx.arc(48, 26, 4.5, 0, Math.PI * 2); 
       pawCtx.fill();
 
       const tex = new THREE.CanvasTexture(pawCanvas);
@@ -737,55 +570,20 @@ export const GameMap: React.FC<GameMapProps> = ({
       return tex;
     };
 
-    const defaultPawTex = createPawTexture();
+    const defaultPawTex = createPlayerTrailPawTexture();
     let currentPawTex: THREE.Texture = defaultPawTex;
 
-    // Load uploaded paw textures if available with validation
-    textureLoader.load(
-      '/map/paw.png',
-      (tex) => {
-        if (tex.image && (tex.image.width > 1 || tex.image.naturalWidth > 1)) {
-          tex.colorSpace = THREE.SRGBColorSpace;
-          currentPawTex = tex;
-        } else {
-          textureLoader.load(
-            '/map/paws.png',
-            (backupTex) => {
-              if (backupTex.image && (backupTex.image.width > 1 || backupTex.image.naturalWidth > 1)) {
-                backupTex.colorSpace = THREE.SRGBColorSpace;
-                currentPawTex = backupTex;
-              }
-            }
-          );
-        }
-      },
-      undefined,
-      () => {
-        textureLoader.load(
-          '/map/paws.png',
-          (tex) => {
-            if (tex.image && (tex.image.width > 1 || tex.image.naturalWidth > 1)) {
-              tex.colorSpace = THREE.SRGBColorSpace;
-              currentPawTex = tex;
-            }
-          }
-        );
-      }
-    );
-
-    // Footprints trail array
     const footprints: { mesh: THREE.Mesh; age: number; maxLife: number }[] = [];
-    const footprintGeo = new THREE.PlaneGeometry(1.6, 1.6); // Cute tiny paw prints
+    const footprintGeo = new THREE.PlaneGeometry(1.6, 1.6); 
     let distanceTraveled = 0;
     let lastCatX = catPosRef.current.x;
     let lastCatZ = catPosRef.current.z;
-    let alternatePaw = false; // Alternate left and right steps
+    let alternatePaw = false; 
 
-    // 9. Animation & Loop state variables
     let animationFrameId: number;
     let bobTime = 0;
     let footstepDist = 0;
-    const baseSpeed = 0.45; // Units per frame
+    const baseSpeed = 0.45; 
 
     let lastIsMoving = false;
     let lastFacingLeft = false;
@@ -793,10 +591,9 @@ export const GameMap: React.FC<GameMapProps> = ({
 
     const tick = () => {
       let isMovingNow = false;
-      let moveDir = 0; // 0 for unchanged, -1 left, 1 right
+      let moveDir = 0; 
       const activeSpeed = statusRef.current.energy < 30 ? baseSpeed * 0.5 : baseSpeed;
 
-      // A. Movement Logic
       if (isTravelingRef.current && travelTargetRef.current) {
         const target = travelTargetRef.current;
         const dx = target.x - catPosRef.current.x;
@@ -857,10 +654,8 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       }
 
-      // Sync coordinate positions
       catGroup.position.set(catPosRef.current.x, 0, catPosRef.current.z);
 
-      // B. Walk Sound Effects & Footprint trail generator
       if (isMovingNow) {
         bobTime += 0.25;
         footstepDist += activeSpeed;
@@ -869,7 +664,6 @@ export const GameMap: React.FC<GameMapProps> = ({
           audio.playWaterLap();
         }
 
-        // Footprint Generation Logic
         const dx = catPosRef.current.x - lastCatX;
         const dz = catPosRef.current.z - lastCatZ;
         const distStep = Math.sqrt(dx * dx + dz * dz);
@@ -884,7 +678,6 @@ export const GameMap: React.FC<GameMapProps> = ({
             const perpX = -Math.sin(angle);
             const perpZ = Math.cos(angle);
 
-            // Alternate side offsets to simulate double-step paw path
             const sideOffset = alternatePaw ? 0.45 : -0.45;
             alternatePaw = !alternatePaw;
 
@@ -900,7 +693,7 @@ export const GameMap: React.FC<GameMapProps> = ({
             });
 
             const fpMesh = new THREE.Mesh(footprintGeo, fpMat);
-            fpMesh.position.set(fpX, 0.03, fpZ); // Raised flatly slightly above groundbasemap
+            fpMesh.position.set(fpX, 0.03, fpZ); 
             fpMesh.rotation.x = -Math.PI / 2;
             fpMesh.rotation.z = -angle - Math.PI / 2;
 
@@ -908,17 +701,15 @@ export const GameMap: React.FC<GameMapProps> = ({
             footprints.push({
               mesh: fpMesh,
               age: 0,
-              maxLife: 160 // Trail fades out after ~2.6 seconds (160 frames)
+              maxLife: 160 
             });
           }
         }
       }
 
-      // Track historical cat position for footprint increments
       lastCatX = catPosRef.current.x;
       lastCatZ = catPosRef.current.z;
 
-      // Update Footprints Trail Lifetime & Fading
       for (let i = footprints.length - 1; i >= 0; i--) {
         const fp = footprints[i];
         fp.age += 1;
@@ -937,7 +728,6 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       }
 
-      // Smooth React state transitions to avoid redundant re-renders
       if (isMovingNow !== lastIsMoving) {
         lastIsMoving = isMovingNow;
         setIsMoving(isMovingNow);
@@ -955,35 +745,51 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       }
 
-      // Track movement in Z to determine if we are facing back
       const dzMovement = catPosRef.current.z - lastCatZ;
       if (isMovingNow && Math.abs(dzMovement) > 0.02) {
-        const movingBack = dzMovement < -0.02; // Moving up means negative Z (back of the cat)
+        const movingBack = dzMovement < -0.02; 
         if (movingBack !== lastFacingBack) {
           lastFacingBack = movingBack;
           setFacingBack(movingBack);
         }
       }
 
-      // Rotate Waypoint Rings & Float Waypoint Cards
       const time = clock.getElapsedTime();
       waypointMeshes.forEach((mesh) => {
         const ring = mesh.children[0];
         const card = mesh.children[1];
-        if (ring) ring.rotation.z = time * 0.5; // Rotate flat on ground
+        if (ring) ring.rotation.z = time * 0.5; 
         if (card) {
           card.position.y = 3.3 + Math.sin(time * 2.5 + mesh.position.x) * 0.4;
-        card.rotation.y = time * 0.8; // Spin card token
-      }
+          card.rotation.y = time * 0.8; 
+        }
       });
 
-      // Update coordinate displays (throttled to save CPU)
+      // Animate floating treat pawprints and track proximity collision checks
+      treatMeshes.forEach((mesh) => {
+        const standeePaw = mesh.children[1];
+        if (standeePaw) {
+          standeePaw.position.y = 1.8 + Math.sin(time * 3.5 + mesh.position.x) * 0.2;
+          standeePaw.rotation.y = time * 1.2;
+        }
+      });
+
+      // Positional boundaries proximity check (Radius of 2.5 units) to pick up treats
+      TREAT_LOCATIONS.forEach((treatData) => {
+        if (!collectedTreatsRef.current.includes(treatData.id)) {
+          const tDx = catPosRef.current.x - treatData.x;
+          const tDz = catPosRef.current.z - treatData.z;
+          if (Math.sqrt(tDx * tDx + tDz * tDz) < 2.5) {
+            handleCollectTreatItem(treatData);
+          }
+        }
+      });
+
       if (Math.floor(time * 15) % 3 === 0) {
         setCurrentX(parseFloat(catPosRef.current.x.toFixed(1)));
         setCurrentY(parseFloat(catPosRef.current.z.toFixed(1)));
       }
 
-      // Proximity & Nearest Waypoint checking
       let closestWp: Waypoint | null = null;
       let minDistance = Infinity;
 
@@ -1009,7 +815,6 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       }
 
-      // Smooth Camera Centered Follow (Clamped lookAt)
       const camTargetX = THREE.MathUtils.clamp(catPosRef.current.x, 30, 70);
       const camTargetZ = THREE.MathUtils.clamp(catPosRef.current.z, 30, 70);
 
@@ -1018,23 +823,28 @@ export const GameMap: React.FC<GameMapProps> = ({
 
       camera.position.x = cameraTargetRef.current.x;
       camera.position.y = zoomLevelRef.current;
-      camera.position.z = cameraTargetRef.current.z; // Straight top-down (no 3D tilt offset)
+      camera.position.z = cameraTargetRef.current.z; 
       camera.lookAt(cameraTargetRef.current);
 
-      // Rotate transparent billboards to face camera
-      billboards.forEach((b) => {
-        b.quaternion.copy(camera.quaternion);
-        b.rotation.x = 0; // stand strictly vertical
-        b.rotation.z = 0;
-      });
-
-      // HTML Space Projection Updates
       WAYPOINTS.forEach((wp) => {
         const el = document.getElementById(`waypoint-${wp.id}`);
         if (el) {
           const pos = project3DTo2D(wp.x, wp.y);
           el.style.left = `${pos.x}%`;
           el.style.top = `${pos.y}%`;
+        }
+      });
+
+      TREAT_LOCATIONS.forEach((treat) => {
+        const el = document.getElementById(`treat-node-${treat.id}`);
+        if (el) {
+          if (collectedTreatsRef.current.includes(treat.id)) {
+            el.style.display = 'none';
+          } else {
+            const pos = project3DTo2D(treat.x, treat.z);
+            el.style.left = `${pos.x}%`;
+            el.style.top = `${pos.y}%`;
+          }
         }
       });
 
@@ -1045,7 +855,6 @@ export const GameMap: React.FC<GameMapProps> = ({
         catLabel.style.top = `${pos.y}%`;
       }
 
-      // Render
       renderer.render(scene, camera);
       animationFrameId = requestAnimationFrame(tick);
     };
@@ -1053,7 +862,6 @@ export const GameMap: React.FC<GameMapProps> = ({
     const clock = new THREE.Clock();
     animationFrameId = requestAnimationFrame(tick);
 
-    // 9. Resize handler
     const handleResize = () => {
       if (!containerRef.current || !renderer || !camera) return;
       const w = containerRef.current.clientWidth;
@@ -1065,7 +873,6 @@ export const GameMap: React.FC<GameMapProps> = ({
 
     window.addEventListener('resize', handleResize);
 
-    // 10. Cleanup
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
@@ -1080,11 +887,22 @@ export const GameMap: React.FC<GameMapProps> = ({
       
       footprintGeo.dispose();
       defaultPawTex.dispose();
+      treatPawTex.dispose();
       footprints.forEach((fp) => {
         scene.remove(fp.mesh);
         if (fp.mesh.material instanceof THREE.Material) {
           fp.mesh.material.dispose();
         }
+      });
+
+      treatMeshes.forEach((mesh) => {
+        scene.remove(mesh);
+        mesh.children.forEach(child => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            child.material.dispose();
+          }
+        });
       });
 
       waypointMeshes.forEach((mesh) => {
@@ -1103,7 +921,7 @@ export const GameMap: React.FC<GameMapProps> = ({
         }
       });
     };
-  }, [status.avatarId, status.name, onTravelCost, onVisitWaypoint]);
+  }, [status.avatarId, status.name, onTravelCost, onVisitWaypoint, collectedTreatIds]);
 
   const allWaypointsVisited = ['rival', 'comrades', 'food', 'pet'].every((id) =>
     status.visitedPoints.includes(id)
@@ -1123,7 +941,7 @@ export const GameMap: React.FC<GameMapProps> = ({
           Adopt Don't Shop
         </div>
       </header>
-      {/* Top Banner Alert (Locked State) */}
+
       <AnimatePresence>
         {errorMessage && (
           <motion.div
@@ -1157,7 +975,6 @@ export const GameMap: React.FC<GameMapProps> = ({
           </div>
         </div>
 
-        {/* Stray Advocacy compact row/insert */}
         <div className="hidden md:flex flex-col gap-0.5 px-4 border-l border-r border-[#f4c37c]/25 max-w-md text-center" id="campaign-widget">
           <span className="text-[8px] font-sans font-black text-[#f4c37c] uppercase tracking-[0.2em] block mb-0.5">STRAY ADVOCACY</span>
           <p className="text-[10px] font-serif leading-normal text-[#ffe0ad]/85 italic">
@@ -1208,19 +1025,16 @@ export const GameMap: React.FC<GameMapProps> = ({
         </div>
       </div>
 
-      {/* Main Content Layout - Full Width Map, No Sidebar */}
+      {/* Main Content Layout */}
       <div className="max-w-7xl mx-auto z-10 flex flex-col gap-6 w-full min-h-[500px]" id="map-workspace-row">
-        
-        {/* Full Width: Game Map Board */}
         <div
           ref={containerRef}
           className="saga-map-shell w-full flex flex-col justify-between relative overflow-hidden h-[500px] md:h-[620px] select-none"
           id="map-canvas-container"
         >
-          {/* Three.js canvas backdrop */}
           <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block z-0" />
 
-          {/* 3D-to-2D Screen Space Projector HTML Floating Markers Overlay */}
+          {/* 3D-to-2D Space Overlay */}
           <div className="absolute inset-0 pointer-events-none z-10">
             
             {/* Active Floating Cat Marker Overlay */}
@@ -1229,7 +1043,6 @@ export const GameMap: React.FC<GameMapProps> = ({
               className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-[85%] flex flex-col items-center select-none z-20"
             >
               <div className="relative flex flex-col items-center">
-                {/* Floating Cat Icon */}
                 <div
                   className={`drop-shadow-[0_8px_6px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
                     isMoving ? (exhausted ? 'animate-[bounce_1.6s_infinite]' : 'animate-bounce') : ''
@@ -1249,14 +1062,13 @@ export const GameMap: React.FC<GameMapProps> = ({
                   />
                 </div>
                 
-                {/* Dynamic Label */}
                 <div className="bg-editorial-ink text-editorial-bg text-[8px] font-sans font-black tracking-widest uppercase border border-editorial-ink px-1.5 py-0.5 rounded-xs shadow-md whitespace-nowrap mt-1">
                   {status.name}
                 </div>
               </div>
             </div>
 
-            {/* Waypoint Clickable HUD Buttons (Rendered exactly above 3D waypoint positions) */}
+            {/* Waypoint Clickable HUD Buttons */}
             {WAYPOINTS.map((wp) => {
               const isVisited = status.visitedPoints.includes(wp.id);
               const isActive = activeWaypointId === wp.id;
@@ -1272,7 +1084,6 @@ export const GameMap: React.FC<GameMapProps> = ({
                   onMouseLeave={() => setActiveWaypointId(null)}
                   className="absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 flex flex-col items-center"
                 >
-                  {/* Waypoint marker badge */}
                   <div className="relative group">
                     <div className="absolute inset-0 rounded-full bg-editorial-ink/20 scale-125 blur-xs group-hover:scale-150 transition-all"></div>
                     <div className="w-8 h-8 rounded-full border border-editorial-ink flex items-center justify-center bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink hover:text-editorial-bg font-sans font-black text-xs transition-colors shadow-sm">
@@ -1286,7 +1097,6 @@ export const GameMap: React.FC<GameMapProps> = ({
                     </div>
                   </div>
 
-                  {/* Tiny label on hover */}
                   {isActive && (
                     <div className="absolute top-10 bg-editorial-bg border border-editorial-ink p-2 shadow-md w-32 rounded-xs pointer-events-none text-left z-30">
                       <h4 className="text-[9px] font-sans font-black text-editorial-ochre uppercase tracking-wider">{wp.name}</h4>
@@ -1296,27 +1106,55 @@ export const GameMap: React.FC<GameMapProps> = ({
                 </button>
               );
             })}
+
+            {/* Floating DOM interactions for treat items (Marked visually as standalone pawprint indicators) */}
+            {TREAT_LOCATIONS.map((treat) => {
+              const isCollected = collectedTreatIds.includes(treat.id);
+              if (isCollected) return null;
+              const isHovered = activeTreatId === treat.id;
+
+              return (
+                <div
+                  key={treat.id}
+                  id={`treat-node-${treat.id}`}
+                  onMouseEnter={() => setActiveTreatId(treat.id)}
+                  onMouseLeave={() => setActiveTreatId(null)}
+                  className="absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center text-amber-600 hover:text-amber-500"
+                >
+                  {/* Paw icon explicitly used for treat encounters */}
+                  <div className="relative p-1.5 bg-amber-950/90 border border-amber-500 rounded-full shadow-lg hover:scale-110 transition-transform">
+                    <PawPrint className="w-4 h-4 animate-pulse" />
+                  </div>
+
+                  {isHovered && (
+                    <div className="absolute top-9 bg-amber-950 border-2 border-amber-500 p-2 shadow-md w-28 rounded-sm pointer-events-none text-left z-30">
+                      <h4 className="text-[9px] font-sans font-black text-amber-400 uppercase tracking-wider">{treat.name} Snack</h4>
+                      <p className="text-[8px] leading-tight font-sans text-amber-200 mt-0.5">{treat.effectLabel}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          {/* Zoom Adjust Controls at Very Leftmost Top of the Map */}
+          {/* Zoom Adjust Controls */}
           <div className="absolute top-4 left-4 z-30 flex flex-col shadow-[2px_2px_0px_#2D2A26] border border-editorial-ink" id="map-zoom-controls">
             <button
               onClick={handleZoomIn}
               className="bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink w-5 h-5 flex items-center justify-center font-sans font-black text-xs transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg"
-              title="Zoom In (Enlarge Map)"
+              title="Zoom In"
             >
               +
             </button>
             <button
               onClick={handleZoomOut}
               className="bg-editorial-bg hover:bg-editorial-ochre text-editorial-ink w-5 h-5 flex items-center justify-center font-sans font-black text-xs transition-colors cursor-pointer select-none active:bg-editorial-ink active:text-editorial-bg border-t border-editorial-ink"
-              title="Zoom Out (Shrink Map)"
+              title="Zoom Out"
             >
               −
             </button>
           </div>
 
-          {/* Sound Mute Toggle directly under zoom controls */}
           <div className="absolute top-[62px] left-4 z-30 flex flex-col shadow-[2px_2px_0px_#2D2A26] border border-editorial-ink" id="map-sound-controls">
             <button
               onClick={handleToggleMute}
@@ -1327,15 +1165,14 @@ export const GameMap: React.FC<GameMapProps> = ({
             </button>
           </div>
 
-          {/* Floating Instructions & Status Badges */}
           <div className="absolute top-4 left-[42px] z-20 bg-editorial-bg/90 backdrop-blur-xs border border-editorial-ink/30 px-3 py-1.5 shadow-xs flex items-center gap-2 max-w-[260px] pointer-events-none">
-            <Info className="w-3.5 h-3.5 text-editorial-ochre shrink-0" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-editorial-ochre shrink-0" />
             <p className="text-[9px] leading-tight font-sans text-editorial-ink font-medium">
-              Use <strong>ARROW keys</strong> or <strong>W/A/S/D</strong> to guide {status.name}. Or click nodes to walk automatically.
+              Use <strong>ARROW keys</strong> or step on scattered golden <strong>Pawprint Icons</strong> to secure Tuna or Kibble rewards!
             </p>
           </div>
 
-          {/* Near Waypoint Proximity Banner Prompt */}
+          {/* Near Waypoint Banner Prompt */}
           <AnimatePresence>
             {nearWaypoint && !isTraveling && (
               <motion.div
@@ -1360,6 +1197,7 @@ export const GameMap: React.FC<GameMapProps> = ({
             </div>
           )}
 
+          {/* Inventory consumables execution and tracking panel */}
           {(status.inventory.length > 0 || status.hypothermia) && (
             <div className="absolute bottom-4 right-4 z-30 flex flex-col gap-2 items-end">
               {status.hypothermia && (
@@ -1367,22 +1205,22 @@ export const GameMap: React.FC<GameMapProps> = ({
                   Hypothermia: AP recovery halved
                 </div>
               )}
-              <div className="parchment-panel p-2 flex gap-2 max-w-md">
+              <div className="parchment-panel p-2 flex gap-2 max-w-md flex-wrap justify-end">
                 {status.inventory.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => onUseItem(item.id)}
-                    className="saga-button px-2 py-1 text-[8px] font-sans font-black uppercase tracking-wider"
-                    title={`Use ${item.name}`}
+                    className="saga-button px-2 py-1 text-[8px] font-sans font-black uppercase tracking-wider bg-amber-900/40 border-amber-700/60"
+                    title={`Eat ${item.name}`}
                   >
-                    {item.name} ({item.effectLabel})
+                    Consume: {item.name} ({item.effectLabel})
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Active Quests Toggle Button (Uses quest.png / quest-1.png) */}
+          {/* Active Quests Toggle Button */}
           <button
             id="quest-button"
             onClick={() => setQuestsOpen(!questsOpen)}
@@ -1434,7 +1272,6 @@ export const GameMap: React.FC<GameMapProps> = ({
                   <button
                     onClick={() => setQuestsOpen(false)}
                     className="text-editorial-ink hover:text-editorial-ochre p-1 transition-colors cursor-pointer"
-                    title="Close Quests Panel"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -1453,7 +1290,7 @@ export const GameMap: React.FC<GameMapProps> = ({
                         onClick={() => {
                           if (!isTraveling) {
                             handleWaypointClick(wp);
-                            setQuestsOpen(false); // Close dropdown on choosing travel destination
+                            setQuestsOpen(false);
                           }
                         }}
                         className="flex items-center gap-2.5 py-1 px-1.5 border border-transparent hover:border-editorial-ink/15 hover:bg-editorial-beige cursor-pointer transition-all group rounded-sm"
@@ -1486,7 +1323,6 @@ export const GameMap: React.FC<GameMapProps> = ({
                   })}
                 </ul>
 
-                {/* Ms. Eleanor's cottage steps indicator */}
                 <div className={`p-2.5 border border-dashed flex items-start gap-2.5 mt-0.5 ${
                   allWaypointsVisited 
                     ? 'bg-emerald-50 border-emerald-500/30' 
@@ -1506,7 +1342,6 @@ export const GameMap: React.FC<GameMapProps> = ({
               </motion.div>
             )}
           </AnimatePresence>
-
 
         </div>
       </div>

@@ -21,7 +21,8 @@ const INITIAL_STATUS: CatStatus = {
   hope: 0,
   inventory: [],
   hypothermia: false,
-  visitedPoints: []
+  visitedPoints: [],
+  collectedTreats: []
 };
 
 const clampStat = (value: number, max = 100) => Math.min(max, Math.max(0, value));
@@ -59,7 +60,8 @@ export default function App() {
       hope,
       inventory: [],
       hypothermia: false,
-      visitedPoints: []
+      visitedPoints: [],
+      collectedTreats: []
     });
     setCatCoords({ x: 13.5, z: 75.7 });
     setGameState('PROLOGUE');
@@ -182,6 +184,26 @@ export default function App() {
     });
   };
 
+  const handleCollectTreat = (item: { id: string; name: string; effectLabel: string; energy: number }) => {
+    setCatStatus((prev) => {
+      if (prev.inventory.some(inv => inv.id === item.id)) {
+        return prev;
+      }
+      const newItem: InventoryItem = {
+        id: item.id,
+        name: item.name,
+        kind: 'consumable',
+        effectLabel: item.effectLabel,
+        energy: item.energy
+      };
+      return {
+        ...prev,
+        inventory: [...prev.inventory, newItem],
+        collectedTreats: [...(prev.collectedTreats || []), item.id]
+      };
+    });
+  };
+
   // Reset the game to play again
   const handleRestart = () => {
     setCatStatus({ ...INITIAL_STATUS, hope: getStoredHope() });
@@ -216,6 +238,7 @@ export default function App() {
           onUnlockEnding={handleUnlockEnding} 
           onTravelCost={handleTravelCost}
           onUseItem={handleUseItem}
+          onCollectTreat={handleCollectTreat}
         />
       )}
 
@@ -229,14 +252,15 @@ export default function App() {
             onUnlockEnding={() => {}} 
             onTravelCost={() => {}}
             onUseItem={() => {}}
+            onCollectTreat={() => {}}
           />
           <ScenarioDialog 
             scenarioId={activeScenarioId} 
-          catName={catStatus.name} 
-          avatarId={catStatus.avatarId} 
-          status={catStatus}
-          onComplete={handleScenarioComplete} 
-        />
+            catName={catStatus.name} 
+            avatarId={catStatus.avatarId} 
+            status={catStatus}
+            onComplete={handleScenarioComplete} 
+          />
         </div>
       )}
 
