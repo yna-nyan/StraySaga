@@ -6,6 +6,16 @@ import { GameMap } from './components/GameMap';
 import { ScenarioDialog } from './components/ScenarioDialog';
 import { Ending } from './components/Ending';
 import { AVATARS, WAYPOINTS } from './data/storyData';
+import {
+  clampStat,
+  computeTurns,
+  computeEnergyCost,
+  computeWarmthDrain,
+  computeHopeEarned,
+  computeWarmthBonus,
+  applyCautiousWarmthPenalty,
+  applyInnocentTrustBonus,
+} from './utils/gameLogic';
 
 const INITIAL_STATUS: CatStatus = {
   name: 'Luna',
@@ -46,8 +56,6 @@ const createInitialHazards = (): Hazard[] => [
     penalty: { energy: -5, warmth: -10 }
   }
 ];
-
-const clampStat = (value: number, max = 100) => Math.min(max, Math.max(0, value));
 
 const getStoredHope = () => {
   if (typeof window === 'undefined') return 0;
@@ -93,7 +101,7 @@ export default function App() {
     const avatar = AVATARS.find(a => a.id === avatarId);
     const stats = avatar?.startingStats ?? { energy: 75, warmth: 55, trust: 25 };
     const hope = getStoredHope();
-    const warmthBoost = Math.min(20, Math.floor(hope / 20) * 5);
+    const warmthBoost = computeWarmthBonus(hope);
     const startingWarmth = clampStat(stats.warmth + warmthBoost);
     setCatStatus({
       name,
@@ -131,10 +139,9 @@ export default function App() {
   };
 
   const handleTravelCost = (distance: number, terrain: 'clear' | 'complex' = 'clear') => {
-    const baseCost = terrain === 'complex' ? 8 : 5;
-    const turns = Math.max(1, Math.ceil(distance / 18));
-    const apCost = baseCost * turns;
-    const warmthDrain = 4 * turns;
+    const turns = computeTurns(distance);
+    const apCost = computeEnergyCost(distance, terrain);
+    const warmthDrain = computeWarmthDrain(distance);
 
     setCatStatus((prev) => {
       const hypothermia = prev.hypothermia || prev.warmth - warmthDrain <= 0;
@@ -144,7 +151,7 @@ export default function App() {
       const nextAp = clampStat(prev.ap - apCost + 5 * recoveryPenalty, prev.maxEnergy);
 
       if (nextEnergy <= 0) {
-        const earnedHope = Math.max(1, Math.floor(prev.trust / 5) + prev.visitedPoints.length * 2);
+        const earnedHope = computeHopeEarned(prev.trust, prev.visitedPoints.length);
         const totalHope = prev.hope + earnedHope;
         window.localStorage.setItem('straySagaHope', String(totalHope));
         setEndingMode('defeated');
@@ -169,14 +176,14 @@ export default function App() {
     // Apply changes to kitten state safely (clamping between 0% and 100%)
     setCatStatus((prev) => {
       const trustGain = prev.archetypeId === 'innocent' && statusChanges.trust > 0
-        ? statusChanges.trust * 2
+        ? applyInnocentTrustBonus(statusChanges.trust)
         : statusChanges.trust;
       const equippedAccessory = prev.inventory.find((item) => item.id === prev.equippedAccessoryId && item.kind === 'accessory');
       const modifiedTrustGain = trustGain > 0
         ? Math.ceil(trustGain * (equippedAccessory?.trustMultiplier ?? 1))
         : trustGain;
       const rivalWarmthChange = prev.archetypeId === 'cautious' && activeScenarioId === 'rival' && statusChanges.warmth < 0
-        ? Math.ceil(statusChanges.warmth / 2)
+        ? applyCautiousWarmthPenalty(statusChanges.warmth)
         : statusChanges.warmth;
       const nextEnergy = clampStat(prev.energy + statusChanges.energy, prev.maxEnergy);
       const nextWarmth = clampStat(prev.warmth + rivalWarmthChange);
@@ -260,7 +267,7 @@ export default function App() {
       const nextEnergy = clampStat(prev.energy + hazard.penalty.energy, prev.maxEnergy);
       const nextWarmth = clampStat(prev.warmth + hazard.penalty.warmth);
       if (nextEnergy <= 0) {
-        const earnedHope = Math.max(1, Math.floor(prev.trust / 5) + prev.visitedPoints.length * 2);
+        const earnedHope = computeHopeEarned(prev.trust, prev.visitedPoints.length);
         const totalHope = prev.hope + earnedHope;
         window.localStorage.setItem('straySagaHope', String(totalHope));
         setEndingMode('defeated');

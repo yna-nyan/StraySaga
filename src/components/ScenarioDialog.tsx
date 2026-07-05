@@ -4,6 +4,7 @@ import { SCENARIOS } from '../data/storyData';
 import { CatIcon } from './CatIcon';
 import { motion, AnimatePresence } from 'motion/react';
 import { audio } from '../utils/audio';
+import { resolveChoice as resolveChoiceLogic } from '../utils/gameLogic';
 import { ArrowRight, Sparkles } from 'lucide-react';
 
 interface ScenarioDialogProps {
@@ -137,15 +138,11 @@ export const ScenarioDialog: React.FC<ScenarioDialogProps> = ({
   const statsChanges = getScenarioStatsChanges(scenarioId);
 
   const resolveChoice = (choice: ScenarioChoice) => {
-    let success = false;
-
-    if (choice.id === 'fight') {
-      success = status.energy > 60;
-    } else if (choice.id === 'sneak') {
-      success = status.archetypeId === 'rogue' || status.energy > 45;
-    } else if (choice.id === 'beg') {
-      success = status.trust > 40;
-    }
+    const success = resolveChoiceLogic(choice.id as 'fight' | 'sneak' | 'beg', {
+      energy: status.energy,
+      trust: status.trust,
+      archetypeId: status.archetypeId,
+    });
 
     setChoiceResult(formatText(success ? choice.successText : choice.failureText));
     if (success) {

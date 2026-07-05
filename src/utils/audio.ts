@@ -11,7 +11,7 @@ class AudioManager {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
-    if (this.ctx.state === 'suspended') {
+    if (this.ctx.state === 'suspended' && !this.isMuted) {
       this.ctx.resume();
     }
   }
@@ -23,8 +23,8 @@ class AudioManager {
     }
     if (muted && this.ctx && this.ctx.state === 'running') {
       this.ctx.suspend();
-    } else if (!muted && this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+    } else if (!muted) {
+      this.init(); // resumes the context since isMuted is now false
     }
   }
 

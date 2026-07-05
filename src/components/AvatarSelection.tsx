@@ -3,7 +3,7 @@ import { AVATARS } from '../data/storyData';
 import { CatIcon } from './CatIcon';
 import { Avatar } from '../types';
 import { motion } from 'motion/react';
-import { ShieldAlert, Heart, Info, Volume2 } from 'lucide-react';
+import { ShieldAlert, Heart, Info } from 'lucide-react';
 import { audio } from '../utils/audio';
 import backgroundImg from '../assets/Background.png';
 import beginJourneyImg from '../assets/Begin_Journey_Button.png';
@@ -78,7 +78,6 @@ const OrnateCornersLarge = () => (
 export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope = 0 }) => {
   const [selectedId, setSelectedId] = useState<string>('calico');
   const [customName, setCustomName] = useState<string>('Luna');
-  const [audioPromptShown, setAudioPromptShown] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'details' | 'stats' | 'journey'>('details');
 
   const selectedAvatar = AVATARS.find(a => a.id === selectedId) || AVATARS[0];
@@ -107,12 +106,6 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope
   const handleStart = () => {
     const finalName = customName.trim() || selectedAvatar.name;
     onSelect(finalName, selectedId);
-  };
-
-  const enableAudio = () => {
-    audio.setMute(false);
-    audio.playMeow(1.1);
-    setAudioPromptShown(false);
   };
 
   const renderCard = (avatar: Avatar) => {
@@ -470,34 +463,6 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({ onSelect, hope
         </div>
       </footer>
 
-      {/* Audio Consent Modal */}
-      {audioPromptShown && (
-        <div className="fixed inset-0 bg-editorial-ink/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="parchment-panel p-6 md:p-8 max-w-md text-center flex flex-col items-center text-editorial-ink">
-            <div className="w-16 h-16 bg-editorial-beige border border-editorial-ink flex items-center justify-center mb-4 text-editorial-ochre">
-              <Volume2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl font-bold font-serif mb-2">Soundtrack Recommended</h3>
-            <p className="text-editorial-ink/80 font-sans text-sm mb-6 leading-relaxed">
-              Stray Saga utilizes client-side synthesized meows, purrs, rain showers, and cozy fireplace crackles. We suggest turning sound on for an atmospheric narrative experience.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 w-full">
-              <button
-                onClick={enableAudio}
-                className="saga-button flex-1 font-sans font-bold py-2.5 px-4 cursor-pointer transition-colors"
-              >
-                Enable Audio
-              </button>
-              <button
-                onClick={() => setAudioPromptShown(false)}
-                className="flex-1 bg-editorial-beige hover:bg-editorial-bg text-editorial-ink font-sans font-bold py-2.5 px-4 border border-editorial-ink cursor-pointer transition-colors"
-              >
-                Keep Muted
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
