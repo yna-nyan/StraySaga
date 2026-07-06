@@ -515,7 +515,7 @@ export const Ending: React.FC<EndingProps> = ({
 
       {/* Footer copyright */}
       <footer className="max-w-4xl mx-auto w-full text-center text-[#f8e5bd]/70 text-[11px] md:text-xs border-t border-[#f4c37c]/35 pt-3 mt-2 z-10 shrink-0">
-        <span><a href="https://github.com/yna-nyan/StraySaga" target="_blank" rel="noopener noreferrer" className="hover:text-[#f4c37c] cursor-pointer transition-colors">Stray Saga</a> &copy; 2026. Stand with animal shelter advocates everywhere. Stop buying, start adopting.</span>
+        <span><a href="https://github.com/yna-nyan/StraySaga" target="_blank" rel="noopener noreferrer" className="hover:text-[#f4c37c] cursor-pointer transition-colors">Stray Saga</a> &copy; 2026. Stop buying, start adopting.</span>
       </footer>
     </div>
   );
