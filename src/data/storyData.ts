@@ -41,7 +41,7 @@ export const AVATARS: Avatar[] = [
     textColor: 'text-zinc-200',
     accentColor: '#18181b',
     portraitSvg: 'black',
-    startingStats: { energy: 70, warmth: 65, trust: 10 }
+    startingStats: { energy: 80, warmth: 65, trust: 10 }
   },
   {
     id: 'tuxedo',
@@ -55,7 +55,7 @@ export const AVATARS: Avatar[] = [
     textColor: 'text-stone-800',
     accentColor: '#ffffff',
     portraitSvg: 'tuxedo',
-    startingStats: { energy: 65, warmth: 50, trust: 60 }
+    startingStats: { energy: 75, warmth: 50, trust: 60 }
   }
 ];
 

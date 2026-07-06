@@ -3,7 +3,7 @@ import { AVATARS } from '../data/storyData';
 import { CatIcon } from './CatIcon';
 import { Avatar } from '../types';
 import { motion } from 'motion/react';
-import { ShieldAlert, Heart, Info, Volume2 } from 'lucide-react';
+import { ShieldAlert, Heart, Info, Volume2, Github } from 'lucide-react';
 import { audio } from '../utils/audio';
 import { MusicController } from './MusicController';
 import backgroundImg from '../assets/Background.png';
@@ -250,6 +250,10 @@ export const AvatarSelection: React.FC<AvatarSelectionProps> = ({
             <Heart className="w-2.5 h-2.5 fill-red-500 text-red-500 animate-pulse" />
             Adopt Don't Shop
           </span>
+          <a href="https://github.com/yna-nyan/StraySaga" target="_blank" rel="noopener noreferrer" className="saga-badge px-3 py-1 text-[9px] font-sans uppercase tracking-widest font-black flex items-center gap-1.5 hover:brightness-110 cursor-pointer transition-all">
+            <Github className="w-2.5 h-2.5" />
+           Github
+          </a>
         </motion.div>
       </header>
 

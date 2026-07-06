@@ -22,11 +22,11 @@ export interface MapEngineCallbacks {
 }
 
 export const TREAT_LOCATIONS: TreatEncounter[] = [
-  { id: 'treat_alley_1', name: 'tuna', x: 25.0, z: 30.0, energyValue: 20, effectLabel: '+20 Energy' },
+  { id: 'treat_alley_1', name: 'tuna', x: 25.0, z: 30.0, energyValue: 55, effectLabel: '+55 Energy' },
   { id: 'treat_alley_2', name: 'kibble', x: 70.0, z: 20.0, energyValue: 15, effectLabel: '+15 Energy' },
   { id: 'treat_alley_3', name: 'tuna', x: 45.0, z: 65.0, energyValue: 35, effectLabel: '+35 Energy' },
   { id: 'treat_alley_4', name: 'kibble', x: 15.0, z: 85.0, energyValue: 25, effectLabel: '+25 Energy' },
-  { id: 'treat_alley_5', name: 'tuna', x: 85.0, z: 70.0, energyValue: 30, effectLabel: '+30 Energy' },
+  { id: 'treat_alley_5', name: 'tuna', x: 85.0, z: 70.0, energyValue: 60, effectLabel: '+60 Energy' },
 ];
 
 export class MapEngine {
