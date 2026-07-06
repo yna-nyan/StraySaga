@@ -438,6 +438,43 @@ export const Ending: React.FC<EndingProps> = ({
       {showTips && (
         <div className="fixed inset-0 bg-[#130b08]/90 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="parchment-panel p-6 md:p-8 max-w-lg flex flex-col relative">
+            {/* Swirly corners */}
+            <div className="absolute top-1 left-1 w-14 h-14 pointer-events-none z-20 overflow-visible">
+              <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+                <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+                <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+                <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+              </svg>
+            </div>
+            <div className="absolute top-1 right-1 w-14 h-14 pointer-events-none z-20 overflow-visible transform scale-x-[-1]">
+              <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+                <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+                <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+                <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+              </svg>
+            </div>
+            <div className="absolute bottom-1 left-1 w-14 h-14 pointer-events-none z-20 overflow-visible transform scale-y-[-1]">
+              <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+                <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+                <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+                <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+              </svg>
+            </div>
+            <div className="absolute bottom-1 right-1 w-14 h-14 pointer-events-none z-20 overflow-visible transform scale-x-[-1] scale-y-[-1]">
+              <svg width="100%" height="100%" viewBox="0 0 40 40" className="overflow-visible opacity-80">
+                <path d="M 2 35 A 33 33 0 0 1 35 2" fill="none" stroke="#7d633a" strokeWidth="1" />
+                <path d="M 2 25 A 23 23 0 0 1 25 2" fill="none" stroke="#9e8254" strokeWidth="0.75" />
+                <path d="M 2 2 Q 12 2 12 12 Q 12 18 6 18 Q 2 18 2 12 Q 2 8 6 8 Q 9 8 8 11" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <path d="M 2 2 Q 2 12 12 12 Q 18 12 18 6 Q 18 2 12 2 Q 8 2 8 6 Q 8 9 11 8" fill="none" stroke="#7d633a" strokeWidth="0.85" strokeLinecap="round" />
+                <circle cx="18" cy="18" r="1.5" fill="#dfbe7b" stroke="#503a15" strokeWidth="0.5" />
+              </svg>
+            </div>
             <h3 className="text-xl font-bold mb-4 text-editorial-ink flex items-center gap-2 font-serif">
               <Heart className="w-5 h-5 fill-red-500 text-red-500" />
               How to Help Stray & Shelter Pets

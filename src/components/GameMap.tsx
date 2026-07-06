@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import * as THREE from 'three';
 import { CatStatus, Waypoint } from '../types';
 import { WAYPOINTS } from '../data/storyData';
 import { CatIcon } from './CatIcon';
@@ -18,32 +17,9 @@ import {
   X,
   PawPrint
 } from 'lucide-react';
-import {
-  drawProceduralMapCanvas,
-  createCatTextureCanvas,
-  createWaypointTextureCanvas
-} from '../utils/mapHelpers';
 import { MusicController } from './MusicController';
-
-// Interface defining the scattered treat positions and state
-interface TreatEncounter {
-  id: string;
-  name: 'tuna' | 'kibble';
-  x: number;
-  z: number;
-  energyValue: number;
-  effectLabel: string;
-}
-
-// 5 Dedicated Treat Encounter locations scattered across the 100x100 board coordinates
-// Energy ranges from 15-35 energy points only as requested
-const TREAT_LOCATIONS: TreatEncounter[] = [
-  { id: 'treat_alley_1', name: 'tuna', x: 25.0, z: 30.0, energyValue: 20, effectLabel: '+20 Energy' },
-  { id: 'treat_alley_2', name: 'kibble', x: 70.0, z: 20.0, energyValue: 15, effectLabel: '+15 Energy' },
-  { id: 'treat_alley_3', name: 'tuna', x: 45.0, z: 65.0, energyValue: 35, effectLabel: '+35 Energy' },
-  { id: 'treat_alley_4', name: 'kibble', x: 15.0, z: 85.0, energyValue: 25, effectLabel: '+25 Energy' },
-  { id: 'treat_alley_5', name: 'tuna', x: 85.0, z: 70.0, energyValue: 30, effectLabel: '+30 Energy' },
-];
+import { MapEngine, TREAT_LOCATIONS } from '../utils/mapEngine/MapEngine';
+import { TreatEncounter } from '../utils/mapEngine/TreatEntity';
 
 interface GameMapProps {
   status: CatStatus;
@@ -94,7 +70,6 @@ export const GameMap: React.FC<GameMapProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState<boolean>(false);
   const [facingLeft, setFacingLeft] = useState<boolean>(false);
-  const [facingBack, setFacingBack] = useState<boolean>(false);
   const thermalDistress = status.warmth < 20;
   const exhausted = status.energy < 30;
 
@@ -104,6 +79,16 @@ export const GameMap: React.FC<GameMapProps> = ({
   const [questImgFailed, setQuestImgFailed] = useState<boolean>(false);
   const questDropdownRef = useRef<HTMLDivElement>(null);
   const [instructionExpanded, setInstructionExpanded] = useState<boolean>(true);
+
+  // Zoom control state
+  const [zoomLevel, setZoomLevel] = useState<number>(50);
+
+  // HTML Containers & Canvas Refs
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // MapEngine OOP Coordinator Ref
+  const engineRef = useRef<MapEngine | null>(null);
 
   // Close quests panel on clicking outside
   useEffect(() => {
@@ -122,837 +107,102 @@ export const GameMap: React.FC<GameMapProps> = ({
     };
   }, [questsOpen]);
 
-  // Sync state and threejs coordinate positions when initialCoords changes
-  useEffect(() => {
-    if (initialCoords) {
-      setCurrentX(initialCoords.x);
-      setCurrentY(initialCoords.z);
-      catPosRef.current.x = initialCoords.x;
-      catPosRef.current.z = initialCoords.z;
-      if (catMeshRef.current) {
-        catMeshRef.current.position.set(initialCoords.x, 0, initialCoords.z);
-      }
-      if (cameraRef.current && cameraTargetRef.current) {
-        cameraTargetRef.current.set(initialCoords.x, 0, initialCoords.z);
-        cameraRef.current.position.set(initialCoords.x, zoomLevelRef.current, initialCoords.z);
-        cameraRef.current.lookAt(cameraTargetRef.current);
-      }
-    }
-  }, [initialCoords]);
-
-  // Zoom control state & ref
-  const [zoomLevel, setZoomLevel] = useState<number>(50); 
-  const zoomLevelRef = useRef(50);
-
-  const handleZoomIn = () => {
-    setZoomLevel((prev) => {
-      const next = Math.max(20, prev - 5);
-      zoomLevelRef.current = next;
-      return next;
-    });
-  };
-
-  const handleZoomOut = () => {
-    setZoomLevel((prev) => {
-      const next = Math.min(85, prev + 5);
-      zoomLevelRef.current = next;
-      return next;
-    });
-  };
-
-  // HTML Containers & Canvas Refs
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // References for Three.js loop to bypass React closures
-  const catPosRef = useRef({
-    x: initialCoords?.x ?? 13.5,
-    z: initialCoords?.z ?? 75.7
-  });
-  const isTravelingRef = useRef(false);
-  const travelTargetRef = useRef<Waypoint | TreatEncounter | null>(null);
-  const nearWaypointRef = useRef<Waypoint | null>(null);
-  const keysRef = useRef<Record<string, boolean>>({});
-  const statusRef = useRef(status);
-  const travelStartRef = useRef<{ x: number; z: number } | null>(null);
-  const manualTravelDebtRef = useRef(0);
-  const collectedTreatsRef = useRef<string[]>(status.collectedTreats ?? []);
-
-  useEffect(() => {
-    statusRef.current = status;
-    const currentTreats = status.collectedTreats ?? [];
-    collectedTreatsRef.current = currentTreats;
-    setCollectedTreatIds(currentTreats);
-  }, [status]);
-
-  // Three.js instances
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const catMeshRef = useRef<THREE.Group | null>(null);
-  const cameraTargetRef = useRef(new THREE.Vector3(50, 0, 50));
-  const treatMeshesGroupRef = useRef<Record<string, THREE.Group>>({});
-
-  // Initialize and update keyboard arrow listeners
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 's', 'a', 'd', ' ', 'Enter'];
-      if (keys.includes(e.key)) {
-        e.preventDefault(); 
-      }
-      
-      const keyMap: Record<string, string> = {
-        ArrowUp: 'up', w: 'up', W: 'up',
-        ArrowDown: 'down', s: 'down', S: 'down',
-        ArrowLeft: 'left', a: 'left', A: 'left',
-        ArrowRight: 'right', d: 'right', D: 'right'
-      };
-
-      const mapped = keyMap[e.key];
-      if (mapped) {
-        keysRef.current[mapped] = true;
-      }
-
-      if ((e.key === ' ' || e.key === 'Enter') && nearWaypointRef.current && !isTravelingRef.current) {
-        handleWaypointClick(nearWaypointRef.current);
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const keyMap: Record<string, string> = {
-        ArrowUp: 'up', w: 'up', W: 'up',
-        ArrowDown: 'down', s: 'down', S: 'down',
-        ArrowLeft: 'left', a: 'left', A: 'left',
-        ArrowRight: 'right', d: 'right', D: 'right'
-      };
-
-      const mapped = keyMap[e.key];
-      if (mapped) {
-        keysRef.current[mapped] = false;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [status.visitedPoints]);
-
-  // Handle waypoint navigation and triggers
-  const handleWaypointClick = (waypoint: Waypoint) => {
-    if (isTravelingRef.current) return;
-
-    if (waypoint.id === 'house') {
-      const allPawsDiscovered = ['rival', 'comrades', 'food', 'pet'].every(id => 
-        status.visitedPoints.includes(id)
-      );
-
-      if (!allPawsDiscovered) {
-        setErrorMessage("Ms. Eleanor's cottage steps are locked. Please discover all 4 target paw prints (Objectives) before visiting her porch.");
-        setTimeout(() => setErrorMessage(null), 5000);
-        audio.playHiss();
-        return;
-      }
-    }
-
-    audio.playPurr();
-    travelStartRef.current = { x: catPosRef.current.x, z: catPosRef.current.z };
-    travelTargetRef.current = waypoint;
-    setTravelTarget(waypoint);
-    isTravelingRef.current = true;
-    setIsTraveling(true);
-  };
-
-  // Handle treat navigation
-  const handleTreatClick = (treat: TreatEncounter) => {
-    if (isTravelingRef.current) return;
-
-    audio.playPurr();
-    travelStartRef.current = { x: catPosRef.current.x, z: catPosRef.current.z };
-    travelTargetRef.current = treat;
-    setTravelTarget(treat);
-    isTravelingRef.current = true;
-    setIsTraveling(true);
-  };
-
-  // Automated/manual collision pickup handler for treats
-  const handleCollectTreatItem = (treat: TreatEncounter) => {
-    if (collectedTreatsRef.current.includes(treat.id)) return;
-
-    audio.playPurr();
-    const dynamicCollected = [...collectedTreatsRef.current, treat.id];
-    collectedTreatsRef.current = dynamicCollected;
-    setCollectedTreatIds(dynamicCollected);
-
-    // Remove ONLY this specific 3D mesh representation from the scene
-    const meshGroup = treatMeshesGroupRef.current[treat.id];
-    if (meshGroup && sceneRef.current) {
-      sceneRef.current.remove(meshGroup);
-    }
-
-    if (onCollectTreat) {
-      onCollectTreat({
-        id: treat.id,
-        name: treat.name,
-        effectLabel: treat.effectLabel,
-        energy: treat.energyValue
-      });
-    } else {
-      status.inventory.push({
-        id: treat.id,
-        name: treat.name,
-        effectLabel: treat.effectLabel,
-        energy: treat.energyValue,
-        kind: 'consumable'
-      });
-    }
-  };
-
-  // Toggle audio
-  const handleToggleMute = () => {
-    const nextMute = !isMuted;
-    setIsMuted(nextMute);
-    if (nextMute) {
-      audio.setMute(true);
-    } else {
-      audio.setMute(false);
-    }
-  };
-
-  // Helper inside setup to generate a canvas texture for the Treat Pawprint markers
-  const createTreatPawTexture = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-    
-    ctx.fillStyle = '#D97706'; // Golden amber color for treat paw prints
-    
-    // Main Pad
-    ctx.beginPath();
-    ctx.ellipse(32, 40, 12, 9, 0, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // 4 Toes
-    ctx.beginPath();
-    ctx.arc(18, 26, 4, 0, Math.PI * 2);
-    ctx.arc(27, 18, 4.5, 0, Math.PI * 2);
-    ctx.arc(37, 18, 4.5, 0, Math.PI * 2);
-    ctx.arc(46, 26, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-  };
-
-  // Initialize Three.js Scene
+  // Mount MapEngine
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
 
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
-
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    cameraRef.current = camera;
-    camera.up.set(0, 0, -1); 
-    cameraTargetRef.current.set(catPosRef.current.x, 0, catPosRef.current.z);
-    camera.position.set(catPosRef.current.x, zoomLevelRef.current, catPosRef.current.z);
-    camera.lookAt(cameraTargetRef.current);
-
-    const renderer = new THREE.WebGLRenderer({
-      canvas: canvasRef.current,
-      antialias: true,
-      alpha: true
-    });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    rendererRef.current = renderer;
-
-    const ambientLight = new THREE.AmbientLight('#FFFDF5', 1.3);
-    scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight('#FFF3E0', 0.9);
-    dirLight.position.set(50, 80, 50);
-    scene.add(dirLight);
-
-    const groundGeo = new THREE.PlaneGeometry(100, 100);
-    const proceduralCanvas = drawProceduralMapCanvas();
-    const proceduralTexture = new THREE.CanvasTexture(proceduralCanvas);
-    proceduralTexture.colorSpace = THREE.SRGBColorSpace;
-
-    const groundMaterial = new THREE.MeshBasicMaterial({ map: proceduralTexture });
-    const groundMesh = new THREE.Mesh(groundGeo, groundMaterial);
-    groundMesh.rotation.x = -Math.PI / 2; 
-    groundMesh.position.set(50, 0, 50); 
-    scene.add(groundMesh);
-
-    const textureLoader = new THREE.TextureLoader();
-
-    const loadBackupBasemap = () => {
-      textureLoader.load(
-        '/map/basemap.png',
-        (texture) => {
-          if (texture.image && (texture.image.width > 1 || texture.image.naturalWidth > 1)) {
-            texture.colorSpace = THREE.SRGBColorSpace;
-            groundMaterial.map = texture;
-            groundMaterial.needsUpdate = true;
-          } else {
-            textureLoader.load(
-              '/map/basemap.jpg',
-              (texJpg) => {
-                if (texJpg.image && (texJpg.image.width > 1 || texJpg.image.naturalWidth > 1)) {
-                  texJpg.colorSpace = THREE.SRGBColorSpace;
-                  groundMaterial.map = texJpg;
-                  groundMaterial.needsUpdate = true;
-                }
-              }
-            );
-          }
+    const engine = new MapEngine(
+      canvasRef.current,
+      containerRef.current,
+      status,
+      { x: initialCoords?.x ?? 13.5, z: initialCoords?.z ?? 75.7 },
+      {
+        onVisitWaypoint,
+        onCollectTreat: (item) => {
+          if (onCollectTreat) onCollectTreat(item);
+        },
+        onTravelCost,
+        onCoordsUpdate: (x, z) => {
+          setCurrentX(x);
+          setCurrentY(z);
+        },
+        onTravelingState: (traveling, target) => {
+          setIsTraveling(traveling);
+          setTravelTarget(target);
+        },
+        onNearWaypointUpdate: (wp) => {
+          setNearWaypoint(wp);
+        },
+        onFacingLeftUpdate: (left) => {
+          setFacingLeft(left);
+        },
+        onMovingStateUpdate: (moving) => {
+          setIsMoving(moving);
+        },
+        onWaypointTriggerError: (msg) => {
+          setErrorMessage(msg);
+          setTimeout(() => setErrorMessage(null), 5000);
         }
-      );
-    };
-
-    textureLoader.load(
-      '/map/wholemap.png',
-      (texture) => {
-        if (texture.image && (texture.image.width > 1 || texture.image.naturalWidth > 1)) {
-          texture.colorSpace = THREE.SRGBColorSpace;
-          groundMaterial.map = texture;
-          groundMaterial.needsUpdate = true;
-        } else {
-          loadBackupBasemap();
-        }
-      },
-      undefined,
-      () => {
-        loadBackupBasemap();
       }
     );
 
-    // Waypoints 3D representation
-    const waypointMeshes: THREE.Group[] = [];
-
-    WAYPOINTS.forEach((wp) => {
-      const group = new THREE.Group();
-      group.position.set(wp.x, 0.1, wp.y);
-
-      const ringGeo = new THREE.RingGeometry(1.8, 2.5, 24);
-      const colorHex = wp.id === 'house' ? '#EF4444' : 
-                       wp.id === 'rival' ? '#3B82F6' :
-                       wp.id === 'pond' ? '#EAB308' :
-                       wp.id === 'comrades' ? '#F97316' :
-                       wp.id === 'food' ? '#22C55E' : '#A855F7';
-                       
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(colorHex),
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.8
-      });
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-      ringMesh.rotation.x = -Math.PI / 2;
-      group.add(ringMesh);
-
-      const letter = wp.id === 'house' ? 'H' :
-                     wp.id === 'rival' ? 'A' :
-                     wp.id === 'pond' ? 'O' :
-                     wp.id === 'comrades' ? 'B' :
-                     wp.id === 'food' ? 'C' : 'D';
-
-      const tokenCanvas = createWaypointTextureCanvas(letter, colorHex);
-      const tokenTexture = new THREE.CanvasTexture(tokenCanvas);
-      tokenTexture.colorSpace = THREE.SRGBColorSpace;
-
-      const cardGeo = new THREE.PlaneGeometry(4.5, 4.5);
-      const cardMat = new THREE.MeshBasicMaterial({
-        map: tokenTexture,
-        transparent: true,
-        side: THREE.DoubleSide
-      });
-      const cardMesh = new THREE.Mesh(cardGeo, cardMat);
-      cardMesh.position.y = 3.5; 
-      group.add(cardMesh);
-
-      if (wp.id !== 'house') {
-        textureLoader.load(
-          '/map/paw.png',
-          (pawTex) => {
-            if (pawTex.image && (pawTex.image.width > 1 || pawTex.image.naturalWidth > 1)) {
-              pawTex.colorSpace = THREE.SRGBColorSpace;
-              cardMat.map = pawTex;
-              cardMat.needsUpdate = true;
-            }
-          }
-        );
-      }
-
-      scene.add(group);
-      waypointMeshes.push(group);
-    });
-
-    // Spawn Treat Encounters as floating standalone pawprints on the map
-    const treatMeshes: THREE.Group[] = [];
-    treatMeshesGroupRef.current = {};
-    const treatPawTex = createTreatPawTexture();
-
-    TREAT_LOCATIONS.forEach((treat) => {
-      // If item is already taken, do not render it
-      if (collectedTreatsRef.current.includes(treat.id)) return;
-
-      const group = new THREE.Group();
-      group.position.set(treat.x, 0.1, treat.z);
-
-      // Glowing base circle shadow
-      const shadowGeo = new THREE.RingGeometry(0, 1.5, 16);
-      const shadowMat = new THREE.MeshBasicMaterial({
-        color: '#D97706',
-        transparent: true,
-        opacity: 0.35,
-        side: THREE.DoubleSide
-      });
-      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
-      shadowMesh.rotation.x = -Math.PI / 2;
-      group.add(shadowMesh);
-
-      // Distinct Pawprint Standee mesh to identify treats visually on map
-      const standeeGeo = new THREE.PlaneGeometry(2.4, 2.4);
-      const standeeMat = new THREE.MeshBasicMaterial({
-        map: treatPawTex,
-        transparent: true,
-        side: THREE.DoubleSide
-      });
-      const standeeMesh = new THREE.Mesh(standeeGeo, standeeMat);
-      standeeMesh.position.y = 2.0;
-      group.add(standeeMesh);
-
-      scene.add(group);
-      treatMeshes.push(group);
-      treatMeshesGroupRef.current[treat.id] = group;
-    });
-
-    // Player 3D Standee Base Group
-    const catGroup = new THREE.Group();
-    catGroup.position.set(catPosRef.current.x, 0, catPosRef.current.z);
-
-    const baseGeo = new THREE.CylinderGeometry(2.4, 2.4, 0.4, 16);
-    const baseMat = new THREE.MeshStandardMaterial({
-      color: '#4a3728',
-      roughness: 0.8
-    });
-    const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-    baseMesh.position.y = 0.2;
-    catGroup.add(baseMesh);
-
-    const shadowGeo = new THREE.RingGeometry(0, 2.6, 16);
-    const shadowMat = new THREE.MeshBasicMaterial({
-      color: '#1a1813',
-      transparent: true,
-      opacity: 0.25,
-      side: THREE.DoubleSide
-    });
-    const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
-    shadowMesh.rotation.x = -Math.PI / 2;
-    shadowMesh.position.y = 0.01;
-    catGroup.add(shadowMesh);
-
-    scene.add(catGroup);
-    catMeshRef.current = catGroup;
-
-    const project3DTo2D = (x: number, z: number) => {
-      const vec = new THREE.Vector3(x, 0, z);
-      vec.project(camera);
-      const xPercent = (vec.x * 0.5 + 0.5) * 100;
-      const yPercent = (-vec.y * 0.5 + 0.5) * 100;
-      return { x: xPercent, y: yPercent };
-    };
-
-    const createPlayerTrailPawTexture = () => {
-      const pawCanvas = document.createElement('canvas');
-      pawCanvas.width = 64;
-      pawCanvas.height = 64;
-      const pawCtx = pawCanvas.getContext('2d')!;
-      pawCtx.fillStyle = '#2b1c11';
-      
-      pawCtx.beginPath();
-      pawCtx.ellipse(32, 40, 14, 10, 0, 0, Math.PI * 2);
-      pawCtx.fill();
-      
-      pawCtx.beginPath();
-      pawCtx.arc(16, 26, 4.5, 0, Math.PI * 2); 
-      pawCtx.arc(26, 17, 5, 0, Math.PI * 2);   
-      pawCtx.arc(38, 17, 5, 0, Math.PI * 2);   
-      pawCtx.arc(48, 26, 4.5, 0, Math.PI * 2); 
-      pawCtx.fill();
-
-      const tex = new THREE.CanvasTexture(pawCanvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      return tex;
-    };
-
-    const defaultPawTex = createPlayerTrailPawTexture();
-    let currentPawTex: THREE.Texture = defaultPawTex;
-
-    const footprints: { mesh: THREE.Mesh; age: number; maxLife: number }[] = [];
-    const footprintGeo = new THREE.PlaneGeometry(1.6, 1.6); 
-    let distanceTraveled = 0;
-    let lastCatX = catPosRef.current.x;
-    let lastCatZ = catPosRef.current.z;
-    let alternatePaw = false; 
-
-    let animationFrameId: number;
-    let bobTime = 0;
-    let footstepDist = 0;
-    const baseSpeed = 0.45; 
-
-    let lastIsMoving = false;
-    let lastFacingLeft = false;
-    let lastFacingBack = false;
-
-    const tick = () => {
-      let isMovingNow = false;
-      let moveDir = 0; 
-      const activeSpeed = statusRef.current.energy < 30 ? baseSpeed * 0.5 : baseSpeed;
-
-      if (isTravelingRef.current && travelTargetRef.current) {
-        const target = travelTargetRef.current;
-        const targetX = target.x;
-        const targetZ = 'y' in target ? target.y : target.z;
-        const dx = targetX - catPosRef.current.x;
-        const dz = targetZ - catPosRef.current.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-
-        if (dist > 0.6) {
-          isMovingNow = true;
-          const stepX = (dx / dist) * activeSpeed;
-          const stepZ = (dz / dist) * activeSpeed;
-          catPosRef.current.x += stepX;
-          catPosRef.current.z += stepZ;
-          moveDir = stepX < 0 ? -1 : 1;
-        } else {
-          catPosRef.current.x = targetX;
-          catPosRef.current.z = targetZ;
-          isTravelingRef.current = false;
-          setIsTraveling(false);
-          if (travelStartRef.current) {
-            const tripX = targetX - travelStartRef.current.x;
-            const tripZ = targetZ - travelStartRef.current.z;
-            const isWaypoint = 'type' in target;
-            const terrain = isWaypoint && (target.type === 'rival' || target.type === 'pond') ? 'complex' : 'clear';
-            onTravelCost(Math.sqrt(tripX * tripX + tripZ * tripZ), terrain);
-            travelStartRef.current = null;
-          }
-          if ('type' in target) {
-            onVisitWaypoint(target);
-          }
-        }
-      } else {
-        let moveX = 0;
-        let moveZ = 0;
-
-        if (keysRef.current['up']) moveZ -= 1;
-        if (keysRef.current['down']) moveZ += 1;
-        if (keysRef.current['left']) moveX -= 1;
-        if (keysRef.current['right']) moveX += 1;
-
-        if (moveX !== 0 && moveZ !== 0) {
-          const length = Math.sqrt(moveX * moveX + moveZ * moveZ);
-          moveX /= length;
-          moveZ /= length;
-        }
-
-        if (moveX !== 0 || moveZ !== 0) {
-          isMovingNow = true;
-          const stepX = moveX * activeSpeed;
-          const stepZ = moveZ * activeSpeed;
-          catPosRef.current.x += stepX;
-          catPosRef.current.z += stepZ;
-          moveDir = stepX < 0 ? -1 : 1;
-
-          catPosRef.current.x = Math.max(4, Math.min(96, catPosRef.current.x));
-          catPosRef.current.z = Math.max(4, Math.min(96, catPosRef.current.z));
-          manualTravelDebtRef.current += Math.sqrt(stepX * stepX + stepZ * stepZ);
-          if (manualTravelDebtRef.current >= 18) {
-            onTravelCost(manualTravelDebtRef.current, 'clear');
-            manualTravelDebtRef.current = 0;
-          }
-        }
-      }
-
-      catGroup.position.set(catPosRef.current.x, 0, catPosRef.current.z);
-
-      if (isMovingNow) {
-        bobTime += 0.25;
-        footstepDist += activeSpeed;
-        if (footstepDist >= 6) {
-          footstepDist = 0;
-          audio.playWaterLap();
-        }
-
-        const dx = catPosRef.current.x - lastCatX;
-        const dz = catPosRef.current.z - lastCatZ;
-        const distStep = Math.sqrt(dx * dx + dz * dz);
-
-        if (distStep > 0.01) {
-          distanceTraveled += distStep;
-
-          if (distanceTraveled >= 2.4) {
-            distanceTraveled = 0;
-
-            const angle = Math.atan2(dz, dx);
-            const perpX = -Math.sin(angle);
-            const perpZ = Math.cos(angle);
-
-            const sideOffset = alternatePaw ? 0.45 : -0.45;
-            alternatePaw = !alternatePaw;
-
-            const fpX = catPosRef.current.x + (perpX * sideOffset) - (dx / distStep) * 0.6;
-            const fpZ = catPosRef.current.z + (perpZ * sideOffset) - (dz / distStep) * 0.6;
-
-            const fpMat = new THREE.MeshBasicMaterial({
-              map: currentPawTex,
-              transparent: true,
-              opacity: 0.6,
-              depthWrite: false,
-              side: THREE.DoubleSide
-            });
-
-            const fpMesh = new THREE.Mesh(footprintGeo, fpMat);
-            fpMesh.position.set(fpX, 0.03, fpZ); 
-            fpMesh.rotation.x = -Math.PI / 2;
-            fpMesh.rotation.z = -angle - Math.PI / 2;
-
-            scene.add(fpMesh);
-            footprints.push({
-              mesh: fpMesh,
-              age: 0,
-              maxLife: 160 
-            });
-          }
-        }
-      }
-
-      lastCatX = catPosRef.current.x;
-      lastCatZ = catPosRef.current.z;
-
-      for (let i = footprints.length - 1; i >= 0; i--) {
-        const fp = footprints[i];
-        fp.age += 1;
-        const progress = fp.age / fp.maxLife;
-
-        if (fp.mesh.material instanceof THREE.MeshBasicMaterial) {
-          fp.mesh.material.opacity = (1 - progress) * 0.6;
-        }
-
-        if (fp.age >= fp.maxLife) {
-          scene.remove(fp.mesh);
-          if (fp.mesh.material instanceof THREE.Material) {
-            fp.mesh.material.dispose();
-          }
-          footprints.splice(i, 1);
-        }
-      }
-
-      if (isMovingNow !== lastIsMoving) {
-        lastIsMoving = isMovingNow;
-        setIsMoving(isMovingNow);
-      }
-
-      if (moveDir === -1) {
-        if (!lastFacingLeft) {
-          lastFacingLeft = true;
-          setFacingLeft(true);
-        }
-      } else if (moveDir === 1) {
-        if (lastFacingLeft) {
-          lastFacingLeft = false;
-          setFacingLeft(false);
-        }
-      }
-
-      const dzMovement = catPosRef.current.z - lastCatZ;
-      if (isMovingNow && Math.abs(dzMovement) > 0.02) {
-        const movingBack = dzMovement < -0.02; 
-        if (movingBack !== lastFacingBack) {
-          lastFacingBack = movingBack;
-          setFacingBack(movingBack);
-        }
-      }
-
-      const time = clock.getElapsedTime();
-      waypointMeshes.forEach((mesh) => {
-        const ring = mesh.children[0];
-        const card = mesh.children[1];
-        if (ring) ring.rotation.z = time * 0.5; 
-        if (card) {
-          card.position.y = 3.3 + Math.sin(time * 2.5 + mesh.position.x) * 0.4;
-          card.rotation.y = time * 0.8; 
-        }
-      });
-
-      // Animate floating treat pawprints and track proximity collision checks
-      treatMeshes.forEach((mesh) => {
-        const standeePaw = mesh.children[1];
-        if (standeePaw) {
-          standeePaw.position.y = 1.8 + Math.sin(time * 3.5 + mesh.position.x) * 0.2;
-          standeePaw.rotation.y = time * 1.2;
-        }
-      });
-
-      // Positional boundaries proximity check (Radius of 2.5 units) to pick up treats
-      TREAT_LOCATIONS.forEach((treatData) => {
-        if (!collectedTreatsRef.current.includes(treatData.id)) {
-          const tDx = catPosRef.current.x - treatData.x;
-          const tDz = catPosRef.current.z - treatData.z;
-          if (Math.sqrt(tDx * tDx + tDz * tDz) < 2.5) {
-            handleCollectTreatItem(treatData);
-          }
-        }
-      });
-
-      if (Math.floor(time * 15) % 3 === 0) {
-        setCurrentX(parseFloat(catPosRef.current.x.toFixed(1)));
-        setCurrentY(parseFloat(catPosRef.current.z.toFixed(1)));
-      }
-
-      let closestWp: Waypoint | null = null;
-      let minDistance = Infinity;
-
-      WAYPOINTS.forEach((wp) => {
-        const dx = catPosRef.current.x - wp.x;
-        const dz = catPosRef.current.z - wp.y;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestWp = wp;
-        }
-      });
-
-      if (minDistance < 6) {
-        if (nearWaypointRef.current?.id !== closestWp?.id) {
-          nearWaypointRef.current = closestWp;
-          setNearWaypoint(closestWp);
-        }
-      } else {
-        if (nearWaypointRef.current !== null) {
-          nearWaypointRef.current = null;
-          setNearWaypoint(null);
-        }
-      }
-
-      const camTargetX = THREE.MathUtils.clamp(catPosRef.current.x, 30, 70);
-      const camTargetZ = THREE.MathUtils.clamp(catPosRef.current.z, 30, 70);
-
-      cameraTargetRef.current.x += (camTargetX - cameraTargetRef.current.x) * 0.08;
-      cameraTargetRef.current.z += (camTargetZ - cameraTargetRef.current.z) * 0.08;
-
-      camera.position.x = cameraTargetRef.current.x;
-      camera.position.y = zoomLevelRef.current;
-      camera.position.z = cameraTargetRef.current.z; 
-      camera.lookAt(cameraTargetRef.current);
-
-      WAYPOINTS.forEach((wp) => {
-        const el = document.getElementById(`waypoint-${wp.id}`);
-        if (el) {
-          const pos = project3DTo2D(wp.x, wp.y);
-          el.style.left = `${pos.x}%`;
-          el.style.top = `${pos.y}%`;
-        }
-      });
-
-      TREAT_LOCATIONS.forEach((treat) => {
-        const el = document.getElementById(`treat-node-${treat.id}`);
-        if (el) {
-          if (collectedTreatsRef.current.includes(treat.id)) {
-            el.style.display = 'none';
-          } else {
-            const pos = project3DTo2D(treat.x, treat.z);
-            el.style.left = `${pos.x}%`;
-            el.style.top = `${pos.y}%`;
-          }
-        }
-      });
-
-      const catLabel = document.getElementById('active-cat-avatar-marker');
-      if (catLabel) {
-        const pos = project3DTo2D(catPosRef.current.x, catPosRef.current.z);
-        catLabel.style.left = `${pos.x}%`;
-        catLabel.style.top = `${pos.y}%`;
-      }
-
-      renderer.render(scene, camera);
-      animationFrameId = requestAnimationFrame(tick);
-    };
-
-    const clock = new THREE.Clock();
-    animationFrameId = requestAnimationFrame(tick);
+    engineRef.current = engine;
 
     const handleResize = () => {
-      if (!containerRef.current || !renderer || !camera) return;
-      const w = containerRef.current.clientWidth;
-      const h = containerRef.current.clientHeight;
-      renderer.setSize(w, h);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
+      if (containerRef.current && engineRef.current) {
+        engineRef.current.resize(
+          containerRef.current.clientWidth,
+          containerRef.current.clientHeight
+        );
+      }
     };
-
     window.addEventListener('resize', handleResize);
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
-      renderer.dispose();
-      groundGeo.dispose();
-      groundMaterial.dispose();
-      proceduralTexture.dispose();
-      baseGeo.dispose();
-      baseMat.dispose();
-      shadowGeo.dispose();
-      shadowMat.dispose();
-      
-      footprintGeo.dispose();
-      defaultPawTex.dispose();
-      treatPawTex.dispose();
-      footprints.forEach((fp) => {
-        scene.remove(fp.mesh);
-        if (fp.mesh.material instanceof THREE.Material) {
-          fp.mesh.material.dispose();
-        }
-      });
-
-      treatMeshes.forEach((mesh) => {
-        scene.remove(mesh);
-        mesh.children.forEach(child => {
-          if (child instanceof THREE.Mesh) {
-            child.geometry.dispose();
-            child.material.dispose();
-          }
-        });
-      });
-
-      waypointMeshes.forEach((mesh) => {
-        const ring = mesh.children[0] as THREE.Mesh;
-        const card = mesh.children[1] as THREE.Mesh;
-        if (ring) {
-          ring.geometry.dispose();
-          (ring.material as THREE.Material).dispose();
-        }
-        if (card) {
-          card.geometry.dispose();
-          (card.material as THREE.Material).dispose();
-          if (card.material instanceof THREE.MeshBasicMaterial && card.material.map) {
-            card.material.map.dispose();
-          }
-        }
-      });
+      engine.destroy();
+      engineRef.current = null;
     };
-  }, [status.avatarId, status.name, onTravelCost, onVisitWaypoint, collectedTreatIds]);
+  }, []);
+
+  // Sync status changes
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.updateStatus(status);
+    }
+    setCollectedTreatIds(status.collectedTreats ?? []);
+  }, [status]);
+
+  // Sync zoom changes
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.setZoom(zoomLevel);
+    }
+  }, [zoomLevel]);
+
+  // Sync initialCoords changes
+  useEffect(() => {
+    if (initialCoords && engineRef.current) {
+      engineRef.current.player.x = initialCoords.x;
+      engineRef.current.player.z = initialCoords.z;
+      setCurrentX(initialCoords.x);
+      setCurrentY(initialCoords.z);
+    }
+  }, [initialCoords]);
+
+  const handleZoomIn = () => {
+    setZoomLevel((prev) => Math.max(20, prev - 5));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel((prev) => Math.min(85, prev + 5));
+  };
+
+  const handleToggleMute = () => {
+    const nextMute = !isMuted;
+    setIsMuted(nextMute);
+    audio.setMute(nextMute);
+  };
 
   const allWaypointsVisited = ['rival', 'comrades', 'food', 'pet'].every((id) =>
     status.visitedPoints.includes(id)
@@ -1083,7 +333,7 @@ export const GameMap: React.FC<GameMapProps> = ({
                   avatarId={status.avatarId}
                   type={thermalDistress ? 'shivering' : 'avatar'}
                   size={144}
-                  facingBack={facingBack}
+                  facingBack={false}
                 />
               </div>
               
@@ -1102,7 +352,7 @@ export const GameMap: React.FC<GameMapProps> = ({
               <button
                 key={wp.id}
                 id={`waypoint-${wp.id}`}
-                onClick={() => handleWaypointClick(wp)}
+                onClick={() => engineRef.current?.startTravel(wp)}
                 onMouseEnter={() => {
                   if (!isTraveling) setActiveWaypointId(wp.id);
                 }}
@@ -1144,7 +394,7 @@ export const GameMap: React.FC<GameMapProps> = ({
                 id={`treat-node-${treat.id}`}
                 onMouseEnter={() => setActiveTreatId(treat.id)}
                 onMouseLeave={() => setActiveTreatId(null)}
-                onClick={() => handleTreatClick(treat)}
+                onClick={() => engineRef.current?.startTravel(treat)}
                 className="absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center text-amber-600 hover:text-amber-500 cursor-pointer"
               >
                 {/* Paw icon explicitly used for treat encounters */}
@@ -1192,8 +442,6 @@ export const GameMap: React.FC<GameMapProps> = ({
           </button>
         </div>
 
-
-
         {/* Toolbar - Collapsable Instruction box */}
         <div 
           onClick={() => setInstructionExpanded(!instructionExpanded)}
@@ -1226,7 +474,7 @@ export const GameMap: React.FC<GameMapProps> = ({
           )}
         </AnimatePresence>
 
-        {/* Auto-traveling overlay block - positioned next to Quest button */}
+        {/* Auto-traveling overlay block */}
         {isTraveling && travelTarget && (
           <div className="absolute top-4 right-[156px] bg-editorial-bg border border-editorial-ink px-3 py-1.5 z-20 shadow-xs flex items-center gap-2 text-[10px] font-sans font-black text-editorial-ochre uppercase tracking-wider animate-pulse">
             <Navigation className="w-3.5 h-3.5 animate-spin text-editorial-ink" />
@@ -1255,6 +503,7 @@ export const GameMap: React.FC<GameMapProps> = ({
             direction="up"
           />
         </div>
+
         {/* Right Side: Active Quests Toggle Button */}
         <button
           id="quest-button"
@@ -1329,7 +578,7 @@ export const GameMap: React.FC<GameMapProps> = ({
                       key={wp.id}
                       onClick={() => {
                         if (!isTraveling) {
-                          handleWaypointClick(wp);
+                          engineRef.current?.startTravel(wp);
                         }
                       }}
                       className="flex items-center gap-2.5 py-1.5 px-1.5 border border-transparent hover:border-editorial-ink/10 hover:bg-[#faf5ec] cursor-pointer transition-all group rounded-sm"
