@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { audio } from '../utils/audio';
 import { Heart, RefreshCw, Sparkles, BookOpen, Volume2, VolumeX } from 'lucide-react';
 import { MusicController } from './MusicController';
+import { Credits } from './Credits';
 
 import adoptBtnBg from '../assets/Adopt_Cat_Button.png'; 
 import tipsBtnBg from '../assets/Adoption_Tips_Button.png'; 
@@ -79,8 +80,8 @@ export const Ending: React.FC<EndingProps> = ({
 
     // Fit canvas sizing accurately to parent bounds
     const resizeCanvas = () => {
-      canvas.width = canvas.parentElement?.clientWidth || window.innerWidth;
-      canvas.height = canvas.parentElement?.clientHeight || window.innerHeight;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     };
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
@@ -174,14 +175,14 @@ export const Ending: React.FC<EndingProps> = ({
   };
 
   return (
-    <div className="saga-screen h-screen h-[100dvh] text-editorial-ink flex flex-col justify-between p-4 md:p-8 relative overflow-hidden font-sans select-none" id="ending-screen">
+    <div className="saga-screen min-h-screen text-editorial-ink flex flex-col justify-between p-4 md:p-8 relative overflow-y-auto font-sans select-none" id="ending-screen">
       {/* Warm fireplace glow backdrop layout */}
-      <div className="absolute inset-x-0 bottom-0 h-2/3 bg-[#2a1209]/35 pointer-events-none z-0"></div>
+      <div className="fixed inset-x-0 bottom-0 h-2/3 bg-[#2a1209]/35 pointer-events-none z-0"></div>
       
       {/* Ultra-Smooth HTML5 Canvas Particle Engine for Dispersing Sparks */}
       <canvas 
         ref={canvasRef} 
-        className="absolute inset-0 w-full h-full pointer-events-none z-0 opacity-60"
+        className="fixed inset-0 w-full h-full pointer-events-none z-0 opacity-60"
       />
 
       {/* Header Utilities */}
@@ -509,9 +510,12 @@ export const Ending: React.FC<EndingProps> = ({
         </div>
       )}
 
+      <Credits />
+
+
       {/* Footer copyright */}
       <footer className="max-w-4xl mx-auto w-full text-center text-[#f8e5bd]/70 text-[11px] md:text-xs border-t border-[#f4c37c]/35 pt-3 mt-2 z-10 shrink-0">
-        <span><a href="https://github.com/yna-nyan/StraySaga" target="_blank" rel="noopener noreferrer"className="hover:text-[#f4c37c] cursor-pointer transition-colors">Stray Saga</a> &copy; 2026. Stand with animal shelter advocates everywhere. Stop buying, start adopting.</span>
+        <span><a href="https://github.com/yna-nyan/StraySaga" target="_blank" rel="noopener noreferrer" className="hover:text-[#f4c37c] cursor-pointer transition-colors">Stray Saga</a> &copy; 2026. Stand with animal shelter advocates everywhere. Stop buying, start adopting.</span>
       </footer>
     </div>
   );
